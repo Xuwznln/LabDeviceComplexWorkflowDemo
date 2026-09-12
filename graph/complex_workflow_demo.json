@@ -1,0 +1,28 @@
+{
+    "nodes": [
+        {
+            "id": "reactor",
+            "uuid": "5c2e7d90-4b1f-4a83-9e6a-000000003001",
+            "name": "虚拟反应釜",
+            "children": [],
+            "parent": null,
+            "type": "device",
+            "class": "virtual_reactor_demo",
+            "template_name": "virtual_reactor_demo",
+            "sites_initialized": true,
+            "sites": [],
+            "pose": {
+                "position": {
+                    "x": 0,
+                    "y": 0,
+                    "z": 0
+                }
+            },
+            "config": {
+                "heating_rate_c_per_s": 30.0
+            },
+            "data": {}
+        }
+    ],
+    "links": []
+}

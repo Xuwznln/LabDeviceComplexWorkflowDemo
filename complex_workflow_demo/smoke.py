@@ -209,8 +209,6 @@ def _base_command(repo_root: Path, database_root: Path, management_port: int, ba
         "-g",
         str(_graph_path(repo_root)),
     ]
-    if backend == "ros2":
-        command.append("--disable_hostlink")
     return command
 
 
@@ -232,22 +230,36 @@ def _api_request(port: int, path: str, payload: dict[str, Any] | None = None) ->
 
 
 def _wait_management_api(port: int, process: subprocess.Popen[Any], deadline: float) -> None:
+    """HTTP 存活不代表 Host 已上报能力；等执行端点包含本演示的动作再导入模板。"""
     while time.monotonic() < deadline:
         if process.poll() is not None:
             raise RuntimeError("runtime process exited before the management API came up")
         try:
-            if _api_request(port, "/health").get("status") == "ok":
+            health = _api_request(port, "/health")
+            endpoints = _api_request(port, "/runtime/endpoints?state=online&limit=100")
+            actions = {
+                capability["action_name"]
+                for endpoint in endpoints
+                for capability in endpoint.get("action_capabilities", [])
+                if capability.get("state", "active") == "active"
+            }
+            if (
+                health.get("status") == "ok"
+                and health.get("execution") == "ready"
+                and {"reset","add_reagent","start_heating","report"} <= actions
+            ):
                 return
         except (urllib.error.URLError, OSError):
             pass
         time.sleep(0.3)
-    raise RuntimeError("管理 API 未在时限内就绪")
+    raise RuntimeError("管理 API / Host 执行面 / 设备动作能力未在时限内就绪")
 
 
 def _find_template(port: int, name: str, deadline: float) -> dict[str, Any]:
     while time.monotonic() < deadline:
         listing = _api_request(port, "/registry/workflow-templates")
         matches = [item for item in listing["templates"] if item["display_name"] == name]
+        assert len(matches) <= 1, f"工作流模板显示名重复: {name!r}"
         if matches:
             return matches[0]
         time.sleep(0.3)
@@ -319,9 +331,9 @@ def run_smoke(backend: str = "hostlink", timeout: float = 60.0) -> dict[str, Any
         environment["PYTHONUNBUFFERED"] = "1"
         management_port = _free_port()
         command = _base_command(repo_root, root / "db", management_port, backend)
-        if backend == "hostlink":
-            command += ["--hostlink_bind", "127.0.0.1", "--hostlink_port", str(_free_port())]
-        else:
+        # ROS2 也保留 HostLink 的能力登记与物料管理通道。
+        command += ["--hostlink_bind", "127.0.0.1", "--hostlink_port", str(_free_port())]
+        if backend == "ros2":
             domain_id = str(10 + management_port % 190)
             environment["ROS_DOMAIN_ID"] = domain_id
             command += ["--ros_domain_id", domain_id]

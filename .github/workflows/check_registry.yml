@@ -18,7 +18,7 @@ on:
 
 env:
   # 必须指向包含工作流循环容器（type=loop 节点、@workflow ctx.loop_for / ctx.loop_while）的 Uni-Lab-OS 提交。
-  STABLE_CORE_REF: 265719eb24ab08ff070e089c1af29f3c8c9a42bd
+  STABLE_CORE_REF: 1f1fe05b81518972d2947479483296517b2991a4
 
 jobs:
   prepare:

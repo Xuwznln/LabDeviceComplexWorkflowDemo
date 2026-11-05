@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import secrets
 import socket
 import subprocess
 import sys
@@ -26,6 +27,12 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Any, Sequence
+
+# 新版 Uni-Lab-OS 的管理 API 写请求要求控制面 token。本脚本自己拉起运行时，所以由它决定 token：
+# 经环境变量交给运行时，每个请求都放进 X-UniLab-Token；旧版运行时忽略这个变量和请求头。
+CONTROL_TOKEN_ENV = "UNILABOS_BASICCONFIG_CONTROL_TOKEN"
+CONTROL_TOKEN_HEADER = "X-UniLab-Token"
+CONTROL_TOKEN = os.environ.get(CONTROL_TOKEN_ENV, "").strip() or secrets.token_urlsafe(24)
 
 #: 与 complex_workflow_demo/workflows.py 保持一致（smoke 独立运行，不 import 设备包）。
 FOR_WORKFLOW_NAME = "循环演示：定次加样"
@@ -219,6 +226,7 @@ def _api_request(port: int, path: str, payload: dict[str, Any] | None = None) ->
     data = None if payload is None else json.dumps(payload).encode("utf-8")
     # GET 不能带 JSON Content-Type：服务端 Backend 路由会尝试解码空 body 而报错
     headers = {} if payload is None else {"Content-Type": "application/json"}
+    headers[CONTROL_TOKEN_HEADER] = CONTROL_TOKEN
     request = urllib.request.Request(url, data=data, headers=headers, method="GET" if payload is None else "POST")
     with urllib.request.urlopen(request, timeout=5) as response:
         body = json.loads(response.read().decode("utf-8"))
@@ -328,6 +336,7 @@ def run_smoke(backend: str = "hostlink", timeout: float = 60.0) -> dict[str, Any
         root = Path(directory)
         log_path = root / "runtime.log"
         environment = os.environ.copy()
+        environment[CONTROL_TOKEN_ENV] = CONTROL_TOKEN
         environment["PYTHONUNBUFFERED"] = "1"
         management_port = _free_port()
         command = _base_command(repo_root, root / "db", management_port, backend)

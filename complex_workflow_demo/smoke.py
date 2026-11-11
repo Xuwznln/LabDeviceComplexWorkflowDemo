@@ -80,7 +80,13 @@ def assert_for_workflow(proof: dict[str, Any]) -> None:
     loop = runs["加样 ×3"]
     assert loop["executor_kind"] == "loop" and loop["attempt_count"] == 1
     assert loop["return_info"]["return_value"]["iterations"] == 3, loop
-    assert loop["control_data"]["loop"] == {"mode": "for", "count": 3, "max_iterations": None, "condition": None, "iteration": 2}, loop
+    assert loop["control_data"]["loop"] == {
+        "mode": "for",
+        "count": 3,
+        "max_iterations": None,
+        "condition": None,
+        "iteration": 2,
+    }, loop
     _assert_loop_attempts(runs["加样"], 3)
     sample_ids = [attempt["return_info"]["return_value"]["sample_id"] for attempt in runs["加样"]["attempts"]]
     assert sample_ids == ["S-1", "S-2", "S-3"], sample_ids
@@ -109,10 +115,17 @@ def assert_until_workflow(proof: dict[str, Any]) -> None:
     assert len(conditions) == 1 and len(runs) == 7, proof
     condition = conditions[0]
     assert [run["name"] for run in proof["node_runs"]] == [
-        "复位", "检测 ×3", "取样检测", condition["name"], "达标确认", "未达标提纯", "汇总报告",
+        "复位",
+        "检测 ×3",
+        "取样检测",
+        condition["name"],
+        "达标确认",
+        "未达标提纯",
+        "汇总报告",
     ]
-    assert all(run["status"] == ("skipped" if run["name"] == "未达标提纯" else "succeeded")
-               for run in proof["node_runs"]), proof
+    assert all(
+        run["status"] == ("skipped" if run["name"] == "未达标提纯" else "succeeded") for run in proof["node_runs"]
+    ), proof
     assert runs["检测 ×3"]["return_info"]["return_value"]["iterations"] == 3
     _assert_loop_attempts(runs["取样检测"], 3)
     _assert_loop_attempts(condition, 3)
@@ -239,17 +252,24 @@ def _base_command(repo_root: Path, database_root: Path, management_port: int, ba
     return command
 
 
-def _api_request(port: int, path: str, payload: dict[str, Any] | None = None) -> Any:
+def _api_request(port: int, path: str, payload: dict[str, Any] | None = None, *, method: str | None = None) -> Any:
     """请求管理 API；workflow 风格 {"code":0,"data":...} 自动解包，诊断路由原样返回。"""
 
     url = f"http://127.0.0.1:{port}/api/v1{path}"
+    if hasattr(payload, "model_dump"):
+        payload = payload.model_dump(mode="json")
     data = None if payload is None else json.dumps(payload).encode("utf-8")
     # GET 不能带 JSON Content-Type：服务端 Backend 路由会尝试解码空 body 而报错
     headers = {} if payload is None else {"Content-Type": "application/json"}
     headers[CONTROL_TOKEN_HEADER] = CONTROL_TOKEN
-    request = urllib.request.Request(url, data=data, headers=headers, method="GET" if payload is None else "POST")
-    with urllib.request.urlopen(request, timeout=5) as response:
-        body = json.loads(response.read().decode("utf-8"))
+    request = urllib.request.Request(
+        url, data=data, headers=headers, method=method or ("GET" if payload is None else "POST")
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=5) as response:
+            body = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as error:
+        raise RuntimeError(f"管理 API {path} 返回 {error.code}: {error.read().decode('utf-8')}") from error
     if isinstance(body, dict) and "code" in body:
         if body["code"] != 0:
             raise RuntimeError(f"管理 API {path} 返回错误: {body}")
@@ -274,9 +294,12 @@ def _wait_management_api(port: int, process: subprocess.Popen[Any], deadline: fl
             if (
                 health.get("status") == "ok"
                 and health.get("execution") == "ready"
-                and {"reset","add_reagent","start_heating","report"} <= actions
+                and {"reset", "add_reagent", "start_heating", "report"} <= actions
             ):
                 return
+        except RuntimeError as error:
+            if not isinstance(error.__cause__, urllib.error.HTTPError) or error.__cause__.code != 503:
+                raise
         except (urllib.error.URLError, OSError):
             pass
         time.sleep(0.3)
@@ -355,16 +378,23 @@ def finish_workflow(port, name, workflow, task, deadline):
 def run_resource_scenarios(port, deadline):
     def create(name, mode="step", values=None):
         template = _find_template(port, name, deadline)
-        workflow = _api_request(port, "/workflows/from-template", {"template_uuid": template["uuid"], "bindings": {}})["workflow"]
-        task = _api_request(port, "/workflow-tasks", {"workflow_uuid": workflow["uuid"], "run_mode": mode, "input": values or {}})
+        workflow = _api_request(port, "/workflows/from-template", {"template_uuid": template["uuid"], "bindings": {}})[
+            "workflow"
+        ]
+        task = _api_request(
+            port, "/workflow-tasks", {"workflow_uuid": workflow["uuid"], "run_mode": mode, "input": values or {}}
+        )
         return workflow, task
 
     def control(task, kind):
         current = _api_request(port, f"/workflow-tasks/{task['uuid']}")
         if kind == "pause" and current["control_status"] == "paused":
             return current
-        return _api_request(port, f"/workflow-tasks/{task['uuid']}/commands", {"type": kind,
-            "expected_revision": current["control_revision"], "idempotency_key": str(uuid4())})
+        return _api_request(
+            port,
+            f"/workflow-tasks/{task['uuid']}/commands",
+            {"type": kind, "expected_revision": current["control_revision"], "idempotency_key": str(uuid4())},
+        )
 
     def wait_steps(task, count):
         while time.monotonic() < deadline:
@@ -384,13 +414,29 @@ def run_resource_scenarios(port, deadline):
     control(lender, "pause")
     bw, borrower = create(name)
     owner = _api_request(port, f"/workflow-resource-intervals?task_uuid={lender['uuid']}")[0]
-    loan = _api_request(port, f"/workflow-resource-intervals/{owner['owner_uuid']}/lend", {
-        "loan_uuid": str(uuid4()), "borrower_task_uuid": borrower["uuid"],
-        "expected_version": owner["version"], "reason": "已暂停原任务并确认设备空闲"})
+    loan = _api_request(
+        port,
+        f"/workflow-resource-intervals/{owner['owner_uuid']}/lend",
+        {
+            "loan_uuid": str(uuid4()),
+            "borrower_task_uuid": borrower["uuid"],
+            "expected_version": owner["version"],
+            "reason": "已暂停原任务并确认设备空闲",
+        },
+    )
     control(lender, "resume")
     control(borrower, "step")
     wait_steps(borrower, 1)
-    assert len([run for run in _api_request(port, f"/workflow-tasks/{lender['uuid']}/node-runs") if run["status"] == "succeeded"]) == 1
+    assert (
+        len(
+            [
+                run
+                for run in _api_request(port, f"/workflow-tasks/{lender['uuid']}/node-runs")
+                if run["status"] == "succeeded"
+            ]
+        )
+        == 1
+    )
     assert _api_request(port, "/workflow-resource-loans")[0]["loan_uuid"] == loan["loan_uuid"]
     control(borrower, "resume")
     proof["borrower_workflow"] = finish_workflow(port, name, bw, borrower, deadline)
@@ -403,7 +449,12 @@ def run_resource_scenarios(port, deadline):
     control(custody, "step")
     wait_steps(custody, 1)
     held = _api_request(port, "/workflow-device-tenancies")
-    assert len(held) == 1 and held[0]["device_key"] == "/devices/reactor" and held[0]["material_uuid"] == sample and held[0]["state"] == "loaded", held
+    assert (
+        len(held) == 1
+        and held[0]["device_key"] == "/devices/reactor"
+        and held[0]["material_uuid"] == sample
+        and held[0]["state"] == "loaded"
+    ), held
     ow, other = create("资源演示：空闲借还", mode="normal")
     control(custody, "step")
     wait_steps(custody, 2)
@@ -418,15 +469,22 @@ def run_resource_scenarios(port, deadline):
 
 def _execution_start_proof(database_root: Path, proofs: dict[str, Any]) -> dict[str, Any]:
     """对照两进程的持久事实，确认每次设备执行都取得唯一开始许可和回执。"""
-    expected = {attempt["uuid"] for proof in proofs.values() for run in proof["node_runs"]
-                if run["executor_kind"] not in {"loop", "condition"}
-                for attempt in run["attempts"] if attempt["status"] == "succeeded"}
+    expected = {
+        attempt["uuid"]
+        for proof in proofs.values()
+        for run in proof["node_runs"]
+        if run["executor_kind"] not in {"loop", "condition"}
+        for attempt in run["attempts"]
+        if attempt["status"] == "succeeded"
+    }
     authorities = []
     hosts = []
     for path in database_root.rglob("runtime.db"):
         with sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True) as connection:
             connection.row_factory = sqlite3.Row
-            rows = connection.execute("SELECT job_uuid,authority_epoch,authorized_at,receipt FROM workflow_execution_dispatch").fetchall()
+            rows = connection.execute(
+                "SELECT job_uuid,authority_epoch,authorized_at,receipt FROM workflow_execution_dispatch"
+            ).fetchall()
             if rows:
                 authorities.append((path, rows))
             jobs = connection.execute("SELECT job_uuid,status FROM execution_job").fetchall()
@@ -443,26 +501,52 @@ def _execution_start_proof(database_root: Path, proofs: dict[str, Any]) -> dict[
         assert row["authorized_at"] and row["receipt"], dict(row)
         receipt = json.loads(row["receipt"])
         assert receipt["permit"]["authority_epoch"] == row["authority_epoch"]
-        records.append({"job_uuid": row["job_uuid"], "authorized_at": row["authorized_at"],
-                        "receipt_uuid": receipt["receipt_uuid"], "started_at_ms": receipt["started_at_ms"]})
+        records.append(
+            {
+                "job_uuid": row["job_uuid"],
+                "authorized_at": row["authorized_at"],
+                "receipt_uuid": receipt["receipt_uuid"],
+                "started_at_ms": receipt["started_at_ms"],
+            }
+        )
     with sqlite3.connect(f"file:{authority_path.as_posix()}?mode=ro", uri=True) as connection:
         connection.row_factory = sqlite3.Row
         admissions = connection.execute("SELECT job_uuid,state FROM workflow_resource_admission").fetchall()
         assert {row["job_uuid"] for row in admissions} == expected
         assert {row["state"] for row in admissions} == {"released"}
         assert connection.execute("SELECT count(*) FROM workflow_resource_use").fetchone()[0] == 0
-        intervals = connection.execute("SELECT owner_uuid,task_uuid,lock_key,state,definition FROM workflow_resource_interval").fetchall()
+        intervals = connection.execute(
+            "SELECT owner_uuid,task_uuid,lock_key,state,definition FROM workflow_resource_interval"
+        ).fetchall()
         assert intervals and {row["state"] for row in intervals} == {"released"}, [
-            {**dict(row), "runs": [dict(run) for run in connection.execute(
-                "SELECT workflow_node_uuid,status,control_data,current_job_uuid FROM workflow_node_run WHERE workflow_task_uuid=?",
-                (row["task_uuid"],))]} for row in intervals if row["state"] != "released"]
+            {
+                **dict(row),
+                "runs": [
+                    dict(run)
+                    for run in connection.execute(
+                        "SELECT workflow_node_uuid,status,control_data,current_job_uuid FROM workflow_node_run WHERE workflow_task_uuid=?",
+                        (row["task_uuid"],),
+                    )
+                ],
+            }
+            for row in intervals
+            if row["state"] != "released"
+        ]
         loans = [dict(row) for row in connection.execute("SELECT * FROM workflow_resource_loan")]
         tenancies = [dict(row) for row in connection.execute("SELECT * FROM workflow_device_tenancy")]
         assert loans and all(row["state"] == "returned" for row in loans), loans
         assert tenancies and all(row["state"] == "released" for row in tenancies), tenancies
         interval_proof = [{**dict(row), "definition": json.loads(row["definition"])} for row in intervals]
-    return {"separate_host_database": True, "device_attempt_count": len(expected), "attempts": records,
-            "resource_admission_count": len(admissions), "active_resource_uses": 0, "resource_intervals": interval_proof, "loans": loans, "tenancies": tenancies}
+    return {
+        "separate_host_database": True,
+        "device_attempt_count": len(expected),
+        "attempts": records,
+        "resource_admission_count": len(admissions),
+        "active_resource_uses": 0,
+        "resource_intervals": interval_proof,
+        "loans": loans,
+        "tenancies": tenancies,
+    }
 
 
 def run_smoke(backend: str = "hostlink", timeout: float = 60.0) -> dict[str, Any]:
@@ -510,6 +594,9 @@ def run_smoke(backend: str = "hostlink", timeout: float = 60.0) -> dict[str, Any
                     check(proof)
                     proofs[key] = proof
                 proofs.update(run_resource_scenarios(management_port, deadline))
+                from .physical_smoke import run_physical_scenario
+
+                proofs["physical_workflow"] = run_physical_scenario(management_port, deadline)
                 starts = _execution_start_proof(root / "db", proofs)
                 return {"success": True, "backend": backend, "execution_starts": starts, **proofs}
             except Exception:

@@ -30,7 +30,9 @@ def test_real_complex_workflow_hostlink_smoke() -> None:
 
     assert len(proof["execution_starts"]["loans"]) == 1
     assert {row["state"] for row in proof["execution_starts"]["loans"]} == {"returned"}
-    assert len(proof["execution_starts"]["tenancies"]) == 1
+    assert len(proof["execution_starts"]["tenancies"]) == 2
     assert {row["state"] for row in proof["execution_starts"]["tenancies"]} == {"released"}
     assert all(proof[key]["task_status"] == "succeeded" for key in
                ("lender_workflow", "borrower_workflow", "custody_workflow", "custody_competitor"))
+
+    assert proof["physical_workflow"]["physical_settlement"]["target_actual_ul"] == 16

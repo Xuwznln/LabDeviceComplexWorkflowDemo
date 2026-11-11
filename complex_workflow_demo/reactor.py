@@ -24,7 +24,22 @@ from typing import Any, Dict, List, Optional, TypedDict
 from unilabos.registry.decorators import action, device, not_action, topic_config, resource
 
 from unilabos.registry.placeholder_type import ResourceSlot
+from unilabos.registry.annotations import JSONValue
 from pylabrobot.resources import Resource
+
+
+class TransferResult(TypedDict):
+    material_transfer_receipts: list[dict[str, JSONValue]]
+
+
+class AliquotResult(TypedDict):
+    material_aliquot_receipts: list[dict[str, JSONValue]]
+    inventory_consumptions: list[dict[str, JSONValue]]
+
+
+class SourceSelection(TypedDict):
+    lot: str
+    quantity: float
 
 
 class CustodyResult(TypedDict):
@@ -73,28 +88,139 @@ class VirtualReactorDemo:
         self._heater: Optional[threading.Thread] = None
         self._reset_state()
 
-    @action(contract="typed", always_free=False, display_name="装载样品", resource_contract={
-        "version": 1, "device_tenancy": {"mode": "task_while_loaded", "material_param": "sample", "acquire_device_param": "vessel"}})
+    @action(
+        contract="typed",
+        always_free=False,
+        display_name="装载样品",
+        resource_contract={
+            "version": 1,
+            "device_tenancy": {
+                "mode": "task_while_loaded",
+                "material_param": "sample",
+                "acquire_device_param": "vessel",
+            },
+        },
+    )
     def load_sample(self, sample: ResourceSlot, vessel: str) -> CustodyResult:
         if getattr(self, "_sample_loaded", False):
             raise RuntimeError("设备中已有样品")
         self._sample_loaded = True
         return {"loaded": True}
 
-    @action(contract="typed", always_free=False, display_name="原位处理", resource_contract={
-        "version": 2, "operate_in_place": {"material_param": "sample"}})
+    @action(
+        contract="typed",
+        always_free=False,
+        display_name="原位处理",
+        resource_contract={"version": 2, "operate_in_place": {"material_param": "sample"}},
+    )
     def process_sample(self, sample: ResourceSlot) -> CustodyResult:
         if not getattr(self, "_sample_loaded", False):
             raise RuntimeError("设备中没有样品")
         return {"loaded": True}
 
-    @action(contract="typed", always_free=False, display_name="卸载样品", resource_contract={
-        "version": 1, "device_tenancy": {"mode": "task_while_loaded", "material_param": "sample", "release_device_param": "vessel"}})
+    @action(
+        contract="typed",
+        always_free=False,
+        display_name="卸载样品",
+        resource_contract={
+            "version": 1,
+            "device_tenancy": {
+                "mode": "task_while_loaded",
+                "material_param": "sample",
+                "release_device_param": "vessel",
+            },
+        },
+    )
     def unload_sample(self, sample: ResourceSlot, vessel: str) -> CustodyResult:
         if not getattr(self, "_sample_loaded", False):
             raise RuntimeError("设备中没有样品")
         self._sample_loaded = False
         return {"loaded": False}
+
+    @action(contract="typed", display_name="选择演示来源")
+    def select_source(self, lot: str) -> SourceSelection:
+        return {"lot": lot, "quantity": 10.0}
+
+    @action(
+        contract="typed",
+        always_free=False,
+        display_name="抓取到夹爪",
+        resource_contract={
+            "version": 2,
+            "transfer_step": {
+                "operation": "pick",
+                "material_param": "sample",
+                "owner_param": "owner",
+                "site_param": "site",
+                "carrier_params": ["carrier"],
+            },
+        },
+    )
+    def pick(
+        self, sample: ResourceSlot, owner: ResourceSlot, site: str, carrier: ResourceSlot, gripper_site: str
+    ) -> TransferResult:
+        return {
+            "material_transfer_receipts": [
+                {
+                    "material_uuid": sample.unilabos_uuid,
+                    "target_owner_uuid": carrier.unilabos_uuid,
+                    "target_site_uuid": gripper_site,
+                }
+            ]
+        }
+
+    @action(
+        contract="typed",
+        always_free=False,
+        display_name="放回目标库位",
+        resource_contract={
+            "version": 2,
+            "transfer_step": {
+                "operation": "place",
+                "material_param": "sample",
+                "owner_param": "owner",
+                "site_param": "site",
+                "carrier_params": ["carrier"],
+            },
+        },
+    )
+    def place(self, sample: ResourceSlot, owner: ResourceSlot, site: str, carrier: ResourceSlot) -> TransferResult:
+        return {
+            "material_transfer_receipts": [
+                {
+                    "material_uuid": sample.unilabos_uuid,
+                    "target_owner_uuid": owner.unilabos_uuid,
+                    "target_site_uuid": site,
+                }
+            ]
+        }
+
+    @action(
+        contract="typed",
+        always_free=False,
+        display_name="按实测量分装",
+        resource_contract={
+            "version": 2,
+            "aliquot": {"source_material_param": "source", "target_material_params": ["target"]},
+        },
+    )
+    def aliquot(self, source: ResourceSlot, target: ResourceSlot, solvent: dict[str, JSONValue]) -> AliquotResult:
+        # 虚拟设备模拟计划 10 ul、实测 8 ul；驱动仅回报实测事实，由权威统一结算。
+        total = solvent["quantity"]
+        return {
+            "material_aliquot_receipts": [
+                {"target_material_uuid": target.unilabos_uuid, "actual_quantity": 8.0, "quantity_unit": "ul"}
+            ],
+            "inventory_consumptions": [
+                {
+                    "key": "solvent",
+                    "lot_uuid": item["lot_uuid"],
+                    "actual_quantity": 8.0 * item["quantity"] / total,
+                    "quantity_unit": solvent["unit"],
+                }
+                for item in solvent["lots"]
+            ],
+        }
 
     @not_action
     def post_init(self, node: Any) -> None:

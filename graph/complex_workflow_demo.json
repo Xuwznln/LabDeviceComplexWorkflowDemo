@@ -1,56 +1,95 @@
 {
-    "nodes": [
-        {
-            "id": "reactor",
-            "uuid": "5c2e7d90-4b1f-4a83-9e6a-000000003001",
-            "name": "虚拟反应釜",
-            "children": [],
-            "parent": null,
-            "type": "device",
-            "class": "virtual_reactor_demo",
-            "template_name": "virtual_reactor_demo",
-            "sites_initialized": true,
-            "sites": [],
-            "pose": {
-                "position": {
-                    "x": 0,
-                    "y": 0,
-                    "z": 0
-                }
-            },
-            "config": {
-                "heating_rate_c_per_s": 30.0
-            },
-            "data": {}
-        },
-        {
-            "id": "sample",
-            "uuid": "5c2e7d90-4b1f-4a83-9e6a-000000003002",
-            "name": "演示样品",
-            "type": "resource",
-            "class": "Resource",
-            "template_name": "custody_demo_sample",
-            "children": [],
-            "parent": null,
-            "sites": [],
-            "sites_initialized": true,
-            "config": {
-                "type": "Resource"
-            },
-            "data": {},
-            "pose": {
-                "position": {
-                    "x": 20,
-                    "y": 0,
-                    "z": 0
-                },
-                "size": {
-                    "width": 10,
-                    "height": 10,
-                    "depth": 10
-                }
-            }
+  "nodes": [
+    {
+      "id": "reactor",
+      "uuid": "5c2e7d90-4b1f-4a83-9e6a-000000003001",
+      "name": "虚拟反应釜",
+      "children": [],
+      "parent": null,
+      "type": "device",
+      "class": "virtual_reactor_demo",
+      "template_name": "virtual_reactor_demo",
+      "sites_initialized": true,
+      "sites": [],
+      "pose": {
+        "position": {
+          "x": 0,
+          "y": 0,
+          "z": 0
         }
-    ],
-    "links": []
+      },
+      "config": {
+        "heating_rate_c_per_s": 30.0
+      },
+      "data": {}
+    },
+    {
+      "id": "sample",
+      "uuid": "5c2e7d90-4b1f-4a83-9e6a-000000003002",
+      "name": "演示样品",
+      "type": "resource",
+      "class": "Resource",
+      "template_name": "custody_demo_sample",
+      "children": [],
+      "parent": null,
+      "sites": [],
+      "sites_initialized": true,
+      "config": {
+        "type": "Resource"
+      },
+      "data": {},
+      "pose": {
+        "position": {
+          "x": 20,
+          "y": 0,
+          "z": 0
+        },
+        "size": {
+          "width": 10,
+          "height": 10,
+          "depth": 10
+        }
+      }
+    },
+    {
+      "id": "gripper",
+      "uuid": "5c2e7d90-4b1f-4a83-9e6a-000000003003",
+      "name": "演示夹爪",
+      "type": "resource",
+      "class": "Resource",
+      "template_name": "custody_demo_sample",
+      "parent": "reactor",
+      "children": [],
+      "sites_initialized": true,
+      "sites": [
+        {
+          "uuid": "5c2e7d90-4b1f-4a83-9e6a-000000003004",
+          "template_name": "custody_demo_sample",
+          "label": "grip",
+          "meta_data": {
+            "role": "gripper"
+          },
+          "index": 0
+        }
+      ],
+      "config": {
+        "type": "Resource"
+      },
+      "data": {},
+      "pose": {
+        "position": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "size": {
+          "width": 10,
+          "height": 10,
+          "depth": 10
+        }
+      },
+      "parent_uuid": "5c2e7d90-4b1f-4a83-9e6a-000000003001"
+    }
+  ],
+  "links": []
 }

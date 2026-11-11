@@ -7,8 +7,8 @@ host 启动时主仓 AST 扫描发现本模块，模板随注册表上报（``GE
 1. 「循环演示：定次加样」——``for`` 固定 3 轮，循环体参数用 ``{{loop.iteration}}`` 生成样品编号；
 2. 「循环演示：等待升温」——``while`` 对**设备状态** ``reactor.temperature_c < 80`` 判定，循环体为空
    （每 0.5 s 判定一次，"等到某状态"），设备在后台升温；
-3. 「循环演示：提纯达标」——``while`` 对**节点返回值**判定：循环体先提纯再取样检测，条件引用
-   循环体里的检测步骤（首轮前没有产出 → 至少跑一轮，"重复直到达标"）；
+3. 「循环演示：提纯达标」——静态 AST 编译原生 ``if/else``：三轮检测，未达标则提纯，
+   达标则确认；三个检测结果为 false / false / true，未选分支记录 skipped；
 4. 「循环演示：嵌套板孔」——两层 ``for``：外层切换板、内层给孔加样，各自的 ``{{loop.iteration}}``
    取最内层；
 5. 「复杂工作流演示」——加样 ×2 → 后台升温并等到位 → 提纯直到达标 → 汇总。
@@ -17,7 +17,16 @@ host 启动时主仓 AST 扫描发现本模块，模板随注册表上报（``GE
 结果与全部轮次历史；循环节点自己显示"第 i/N 轮"。
 """
 
+from typing import Annotated, TypedDict
+
+from pydantic import Field
 from unilabos.registry.workflows import WorkflowBuildContext, WorkflowGuide, workflow
+
+
+class PolishResult(TypedDict):
+    purity: Annotated[float, Field(ge=0, le=1, unit="fraction")]
+    polish_count: Annotated[int, Field(ge=0, unit="count")]
+
 
 #: smoke/测试按显示名检索模板，保持单一出处。
 FOR_WORKFLOW_NAME = "循环演示：定次加样"
@@ -114,35 +123,36 @@ def wait_for_temperature(ctx: WorkflowBuildContext) -> None:
 
 @workflow(
     display_name=UNTIL_WORKFLOW_NAME,
-    description="复位 -> while 取样未达标（提纯 -> 取样检测）-> 汇总（预期两轮后纯度 0.9 达标）",
-    tags=["complex-workflow", "loop-while", "node-output"],
+    compiler="ast",
+    description="复位 -> 三轮检测：未达标则提纯，达标则确认 -> 汇总（预期提纯两次，纯度 0.9）",
+    tags=["complex-workflow", "loop-for", "condition", "ast"],
     guide=WorkflowGuide(
-        preparation=["「设备」页确认 reactor 在线；无需准备物料。"],
+        preparation=["确认虚拟反应釜 reactor 在线；需要支持 compiler=ast 的框架版本。"],
         expected=[
-            "首轮前「取样检测」还没有结果，循环体先跑一轮：提纯到 0.65，检测 ready=false。",
-            "第二轮提纯到 0.9，检测 ready=true → 条件不成立，循环结束；「提纯」「取样检测」各 2 个 attempt。",
-            "「汇总报告」返回 polish_count = 2、purity = 0.9。",
+            "三轮检测 ready 分别为 false、false、true；条件节点保存每轮 matched 结果。",
+            "「未达标提纯」前两轮 succeeded，第三轮 skipped；「达标确认」恰好相反。",
+            "最终 polish_count = 2、purity = 0.9；跳过的分支不会收到设备调用。",
         ],
-        notes=["条件引用的是循环体里的检测步骤（按步骤名），这就是「重复直到达标」的写法。", _LOOP_NOTE],
+        notes=["函数体仅静态分析；运行时读取每轮检测动作的真实返回值。", _LOOP_NOTE],
     ),
 )
-def polish_until_ready(ctx: WorkflowBuildContext) -> None:
-    """while + 节点返回值：do-while 语义的"重复直到达标"。"""
+def polish_until_ready(ctx: WorkflowBuildContext, *,
+                       threshold: Annotated[float, Field(ge=0, le=1, unit="fraction")] = 0.85) -> PolishResult:
+    """固定三轮覆盖 if/else 两条路径，便于复现和检查 attempt 历史。"""
 
-    _reset(ctx)
-    with ctx.loop_while(
-        ctx.step_output(QUALITY_STEP_NAME, "ready", "==", False),
-        name="提纯直到达标",
-        description="每轮先提纯再检测；检测 ready 为 false 就再来一轮。",
-    ):
-        ctx.run("reactor/polish", {}, name="提纯", description="纯度 +0.25。")
-        ctx.run(
+    ctx.run("reactor/reset", {}, name="复位")
+    with ctx.loop_for(3, name="检测 ×3"):
+        quality = ctx.run(
             "reactor/check_quality",
-            {"threshold": PURITY_THRESHOLD},
+            {"threshold": threshold},
             name=QUALITY_STEP_NAME,
-            description="返回 purity 与 ready；循环条件读它的最新返回值。",
         )
-    ctx.run("reactor/report", {}, name="汇总报告", description="polish_count 应为 2，purity 0.9。")
+        if quality.ready:
+            ctx.run("reactor/report", {}, name="达标确认")
+        else:
+            ctx.run("reactor/polish", {}, name="未达标提纯")
+    report = ctx.run("reactor/report", {}, name="汇总报告")
+    return {"purity": report.purity, "polish_count": report.polish_count}
 
 
 @workflow(
@@ -222,3 +232,21 @@ def complex_workflow(ctx: WorkflowBuildContext) -> None:
         ctx.run("reactor/polish", {}, name="提纯", description="纯度 +0.25。")
         ctx.run("reactor/check_quality", {"threshold": PURITY_THRESHOLD}, name=QUALITY_STEP_NAME, description="ready 判定。")
     ctx.run("reactor/report", {}, name="汇总报告", description="一次读回加样、温度、提纯结果。")
+
+
+from unilabos.registry.placeholder_type import ResourceSlot
+
+
+@workflow(display_name="资源演示：样品托管", compiler="ast", tags=["resource-custody"])
+def sample_custody(ctx: WorkflowBuildContext, *, sample: ResourceSlot, vessel: str = "reactor") -> None:
+    """设备绑定使用 reactor；样品和目标设备由调用方提供参数。"""
+    ctx.run("reactor/load_sample", {"sample": sample, "vessel": vessel}, name="装载样品")
+    ctx.run("reactor/process_sample", {"sample": sample}, name="原位处理")
+    ctx.run("reactor/unload_sample", {"sample": sample, "vessel": vessel}, name="卸载样品")
+
+
+@workflow(display_name="资源演示：空闲借还", compiler="ast", tags=["resource-loan"])
+def idle_lending(ctx: WorkflowBuildContext) -> None:
+    """两次连续设备占用；单步执行第一次后可显式借出空闲区间。"""
+    ctx.run("reactor/check_quality", {}, name="借出前检测")
+    ctx.run("reactor/check_quality", {}, name="归还后检测")

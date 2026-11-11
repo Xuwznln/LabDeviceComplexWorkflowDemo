@@ -19,9 +19,22 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, TypedDict
 
-from unilabos.registry.decorators import action, device, not_action, topic_config
+from unilabos.registry.decorators import action, device, not_action, topic_config, resource
+
+from unilabos.registry.placeholder_type import ResourceSlot
+from pylabrobot.resources import Resource
+
+
+class CustodyResult(TypedDict):
+    loaded: bool
+
+
+@resource(id="custody_demo_sample", category=["virtual_resource"], display_name="托管演示样品")
+def custody_demo_sample(name: str = "sample") -> Resource:
+    return Resource(name=name, size_x=10, size_y=10, size_z=10)
+
 
 #: 初始温度 / 初始纯度 / 每次提纯的纯度增量：与 workflows.py 里的条件阈值配套。
 INITIAL_TEMPERATURE_C = 20.0
@@ -59,6 +72,29 @@ class VirtualReactorDemo:
         self._lock = threading.Lock()
         self._heater: Optional[threading.Thread] = None
         self._reset_state()
+
+    @action(contract="typed", always_free=False, display_name="装载样品", resource_contract={
+        "version": 1, "device_tenancy": {"mode": "task_while_loaded", "material_param": "sample", "acquire_device_param": "vessel"}})
+    def load_sample(self, sample: ResourceSlot, vessel: str) -> CustodyResult:
+        if getattr(self, "_sample_loaded", False):
+            raise RuntimeError("设备中已有样品")
+        self._sample_loaded = True
+        return {"loaded": True}
+
+    @action(contract="typed", always_free=False, display_name="原位处理", resource_contract={
+        "version": 2, "operate_in_place": {"material_param": "sample"}})
+    def process_sample(self, sample: ResourceSlot) -> CustodyResult:
+        if not getattr(self, "_sample_loaded", False):
+            raise RuntimeError("设备中没有样品")
+        return {"loaded": True}
+
+    @action(contract="typed", always_free=False, display_name="卸载样品", resource_contract={
+        "version": 1, "device_tenancy": {"mode": "task_while_loaded", "material_param": "sample", "release_device_param": "vessel"}})
+    def unload_sample(self, sample: ResourceSlot, vessel: str) -> CustodyResult:
+        if not getattr(self, "_sample_loaded", False):
+            raise RuntimeError("设备中没有样品")
+        self._sample_loaded = False
+        return {"loaded": False}
 
     @not_action
     def post_init(self, node: Any) -> None:
@@ -180,7 +216,7 @@ class VirtualReactorDemo:
     @action(
         display_name="提纯",
         description="每次提纯纯度 +0.25（上限 1.0）",
-        always_free=True,
+        always_free=False,
         feedback_interval=1.0,
     )
     def polish(self) -> Dict[str, Any]:
@@ -195,7 +231,7 @@ class VirtualReactorDemo:
     @action(
         display_name="取样检测",
         description="返回当前纯度与是否达标（ready）；while 循环用返回值判定是否继续提纯",
-        always_free=True,
+        always_free=False,
         feedback_interval=1.0,
     )
     def check_quality(self, threshold: float = 0.85) -> Dict[str, Any]:

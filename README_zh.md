@@ -4,14 +4,14 @@
 
 这个外部设备包演示 Uni-Lab-OS 工作流里的**运行时控制流**：循环容器（`for` / `while`）由本机调度器
 逐轮执行，而不是在编辑器里把节点复制 N 份。一台虚拟反应釜提供可判定、可复现的状态与返回值，
-五条 `@workflow` 模板逐个引入一种循环形态，最后一条把它们串成一个真实流程：
+五条 `@workflow` 模板逐个引入一种控制流形态，最后一条把它们串成一个真实流程：
 
 - **`for` 固定轮数**（`with ctx.loop_for(3)`）：循环体参数里用 `{{loop.iteration}}` 生成样品编号
   S-1 / S-2 / S-3；整个参数值恰为占位符时保持数字类型，嵌在文本里做替换；
 - **`while` 判定设备状态**（`ctx.device_state("reactor", "temperature_c", "<", 80)`）：循环体为空，
   每 0.5 s 读一次设备上报的 `temperature_c`，设备在后台以 30 ℃/s 升温——这是「等到某状态」的写法；
-- **`while` 判定节点返回值**（`ctx.step_output("取样检测", "ready", "==", False)`）：循环体先提纯再
-  取样检测，条件引用循环体里的检测步骤；首轮前没有产出所以至少跑一轮——「重复直到达标」；
+- **原生 `if/else` 判定节点返回值**：`compiler="ast"` 静态编译 `if quality.ready`，三轮检测
+  依次为 false / false / true；未达标才提纯，达标则确认，未选分支记录 `skipped`；
 - **嵌套 `for`**：外层切换板、内层给孔加样，`{{loop.iteration}}` 取最内层；内层循环节点随外层每轮
   重新执行；
 - **组合**：加样 ×2 → 后台升温并等到 80 ℃ → 提纯直到达标 → 汇总。
@@ -34,7 +34,8 @@ python -m pip install -e .
 ```
 
 本地演示不需要 AK/SK，也不依赖云端实验室。需要包含工作流循环容器的 Uni-Lab-OS 版本
-（`type="loop"` 节点、`@workflow` 的 `ctx.loop_for` / `ctx.loop_while`）。
+（`type="loop"` 节点、`ctx.loop_for` / `ctx.loop_while`），以及 `compiler="ast"` 条件支持。
+本地迁移版本的条件流程已通过 HostLink 验证，尚未验证 ROS 2。
 
 ## 有终止条件的双运行时 smoke
 
@@ -55,7 +56,7 @@ smoke 启动真实运行时（`unilab -g graph/complex_workflow_demo.json`，启
 | --- | --- | --- |
 | 「循环演示：定次加样」 | 复位 1 · **加样 ×3**（loop）1 · 加样 **3** · 汇总报告 1 | `additions = ["S-1","S-2","S-3"]` |
 | 「循环演示：等待升温」 | 复位 1 · 开始升温 1 · **等待升温**（loop，空循环体，实测轮询 4 次）1 · 停止升温 1 · 汇总报告 1 | `temperature_c = 80` |
-| 「循环演示：提纯达标」 | 复位 1 · **提纯直到达标**（loop）1 · 提纯 **2** · 取样检测 **2**（ready = false → true）· 汇总报告 1 | `polish_count = 2`，`purity = 0.9` |
+| 「循环演示：提纯达标」 | 复位 1 · **检测 ×3**（loop）1 · 检测/条件 **3** · 达标确认 **3**（前两轮 skipped）· 提纯 **3**（末轮 skipped）· 汇总 1 | `polish_count = 2`，`purity = 0.9` |
 | 「循环演示：嵌套板孔」 | 复位 1 · **板 ×2** 1 · 切换到板 **2** · **板孔 ×3**（内层 loop）**2** · 孔位加样 **6** · 汇总报告 1 | `plates = {"1":[1,2,3],"2":[1,2,3]}`，`fill_count = 6` |
 | 「复杂工作流演示」 | 复位 · 加样 ×2 · 加样 **2** · 开始升温 · 等待升温 · 停止升温 · 提纯直到达标 · 提纯 **2** · 取样检测 **2** · 汇总报告 | `additions = ["S-1","S-2"]`，`temperature_c = 80`，`polish_count = 2` |
 
@@ -81,6 +82,23 @@ python -m unilabos --backend ros2 --disable_hostlink --skip_env_check \
 运行页的循环框显示「第 i/N 轮」，节点作业列表里每一轮是一个 attempt。
 
 ## 模板怎么写
+
+条件流程用静态编译：不执行函数体，运行时才读取真实动作结果。
+
+```python
+@workflow(display_name="三轮质量检查", compiler="ast")
+def quality_check(ctx):
+    ctx.run("reactor/reset", {})
+    with ctx.loop_for(3):
+        quality = ctx.run("reactor/check_quality", {"threshold": 0.85})
+        if quality.ready:
+            ctx.run("reactor/report", {})
+        else:
+            ctx.run("reactor/polish", {})
+    ctx.run("reactor/report", {})
+```
+
+下面的原有复杂流程继续使用 builder 模式：
 
 ```python
 from unilabos.registry.workflows import WorkflowBuildContext, workflow
@@ -114,3 +132,32 @@ complex_workflow_demo/
   smoke.py                           经管理 API 驱动的有终止条件真实运行时证明
 tests/test_hostlink_smoke.py         HostLink 集成断言
 ```
+
+
+### 工作流输入输出合同
+
+「循环演示：提纯达标」使用静态注解声明 `threshold` 输入（默认 0.85，范围 0–1，单位 fraction），
+运行前在前端工作流输入区调整。动作参数中的输入引用随流程保留，设备换绑仍由前端实例配置完成。
+末尾返回 `PolishResult`：`purity` 与 `polish_count` 会成为任务的具名输出，并在完成时检查类型与范围。
+HostLink smoke 同时核对默认输入、条件 attempt 历史和最终输出 `{purity: 0.9, polish_count: 2}`。
+
+
+### 持久资源区间验证（dev 迁移工作区）
+
+提纯（polish）和质量检测（check_quality）现在使用设备占用，两个动作之间的连续区间
+由调度权威持久保存。其余免锁演示动作保留原有声明。HostLink smoke 除五条流程的
+业务结果外，还核对每次设备尝试的资源准入、结束后的实际使用清单为空，以及取得过
+的区间全部释放。该验证使用虚拟反应釜，不代表真实硬件或多 slave 验收。
+
+
+## 资源借还与设备托管演示
+
+新增 `资源演示：样品托管`：sample 为前端选择的 ResourceSlot 输入，vessel 默认使用可读设备 ID reactor，
+`reactor/load_sample → reactor/process_sample → reactor/unload_sample`。
+图中增加虚拟 sample；装载后任务单步停顿，其他任务仍不能使用设备，卸载成功后才可继续。
+新增 `资源演示：空闲借还`：连续两次检测，第一步结束后显式借出暂停任务的区间，
+借用者执行完后，原任务才能继续第二步。借用异常需要核实后人工归还。
+
+需要支持 runtime.db v8 的 dev 迁移后端。`python -m complex_workflow_demo.smoke --backend hostlink --timeout 120`
+会运行原有五条流程以及四次资源场景任务，共九个任务，并对照独立 authority / Host 数据库，
+验证开始许可、资源使用、借还及托管最终状态。该演示使用虚拟设备，不代表真实硬件或多 slave 验收。

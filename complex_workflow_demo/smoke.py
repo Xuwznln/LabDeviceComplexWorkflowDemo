@@ -443,15 +443,10 @@ def run_resource_scenarios(port, deadline):
             time.sleep(0.1)
         raise TimeoutError("资源演示动作未完成")
 
-    def tenancies(expected):
-        """读设备托管；动作落 succeeded 后，托管转换（reserved → loaded / released）由调度权威
-        在随后的事务里收敛，所以短暂轮询到期望状态，超时返回最后一次读数交给断言。"""
+    def tenancies():
+        """读设备托管。托管转换与动作终态在同一事务提交：节点一落 succeeded，托管即已是新状态，不需要轮询。"""
 
-        held = _api_request(port, "/workflow-device-tenancies")
-        while not expected(held) and time.monotonic() < deadline:
-            time.sleep(0.1)
-            held = _api_request(port, "/workflow-device-tenancies")
-        return held
+        return _api_request(port, "/workflow-device-tenancies")
 
     proof = {}
     name = "资源演示：空闲借还"
@@ -495,7 +490,7 @@ def run_resource_scenarios(port, deadline):
     cw, custody = create(name, values={"sample": {"uuid": sample}, "vessel": "reactor"})
     control(custody, "step")
     wait_steps(custody, 1)
-    held = tenancies(lambda rows: len(rows) == 1 and rows[0]["state"] == "loaded")
+    held = tenancies()
     assert (
         len(held) == 1
         and held[0]["device_key"] == "/devices/reactor"
@@ -509,7 +504,7 @@ def run_resource_scenarios(port, deadline):
     control(custody, "step")
     proof["custody_workflow"] = finish_workflow(port, name, cw, custody, deadline)
     proof["custody_competitor"] = finish_workflow(port, "资源演示：空闲借还", ow, other, deadline)
-    assert tenancies(lambda rows: rows == []) == []
+    assert tenancies() == []
     assert all(value["task_status"] == "succeeded" for value in proof.values()), proof
     return proof
 

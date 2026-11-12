@@ -63,6 +63,16 @@ def _assert_succeeded(proof: dict[str, Any], expected_names: list[str]) -> dict[
     return _by_name(proof)
 
 
+def _task_value(proof: dict[str, Any], field: str) -> dict[str, Any]:
+    """任务入口参数 / 具名输出。本 smoke 的证据带 ``task_input`` / ``task_output``；Uni-Lab-OS
+    README demo e2e 复用这些断言时，证据里是整个任务 ``proof["task"]``（``input`` / ``output``）。"""
+
+    key = f"task_{field}"
+    if key in proof:
+        return proof[key]
+    return dict(proof["task"].get(field) or {})
+
+
 def _assert_loop_attempts(run: dict[str, Any], iterations: int) -> None:
     """循环体节点：每轮一个 attempt，首轮 initial、其后 loop_iteration，全部成功。"""
 
@@ -141,8 +151,8 @@ def assert_until_workflow(proof: dict[str, Any]) -> None:
         assert [attempt["trigger"] for attempt in run["attempts"]] == ["initial", "loop_iteration", "loop_iteration"]
     report = runs["汇总报告"]["return_info"]["return_value"]
     assert report["polish_count"] == 2 and report["purity"] == 0.9, report
-    assert proof["task_input"] == {"threshold": 0.85}
-    assert proof["task_output"] == {"purity": 0.9, "polish_count": 2}
+    assert _task_value(proof, "input") == {"threshold": 0.85}
+    assert _task_value(proof, "output") == {"purity": 0.9, "polish_count": 2}
 
 
 def assert_nested_workflow(proof: dict[str, Any]) -> None:

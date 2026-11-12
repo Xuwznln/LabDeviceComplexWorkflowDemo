@@ -6,7 +6,7 @@ This external device package demonstrates **runtime control flow** in Uni-Lab-OS
 workflows: loop containers (`for` / `while`) are executed round by round by the
 local scheduler instead of being unrolled into N copies in the editor. One
 virtual reactor provides deterministic, checkable state and return values; five
-`@workflow` templates each introduce one loop form, and the last one chains them
+`@workflow` templates each introduce one control-flow form, and the last one chains them
 into a realistic procedure:
 
 - **`for` with a fixed count** (`with ctx.loop_for(3)`): body parameters use
@@ -17,9 +17,9 @@ into a realistic procedure:
   the body is empty, the condition reads the reported `temperature_c` every 0.5 s
   while the device heats up in the background at 30 °C/s — the "wait until a state"
   idiom;
-- **`while` on a node's return value** (`ctx.step_output("取样检测", "ready", "==", False)`):
-  the body polishes and then samples; the condition references the probe step
-  *inside* the body, so the body runs at least once — "repeat until ready";
+- **native `if/else` on an action result**: `compiler="ast"` statically compiles
+  `if quality.ready`. Three measurements return false / false / true; only the
+  selected branch executes, and the other branch records `skipped`;
 - **nested `for`**: the outer loop switches plates, the inner loop fills wells;
   `{{loop.iteration}}` refers to the innermost loop, and the inner loop node is
   re-executed on every outer round;
@@ -32,8 +32,23 @@ loop node itself shows "round i/N" (`control_data.loop`).
 
 ## Install from GitHub
 
+Requires the unified Uni-Lab-OS core (dev architecture with the V1.0 HTTP API) on
+**CPython 3.14**, plus its companion wheels: the maintained PyLabRobot fork
+`1.0.0b1+unilabos…` and `opentrons-shared-data 10.1.0+unilabos.np2.1`. Build them with the
+core's `scripts/build_wheel_release.py --dependencies-only` and install with `--find-links`.
+ROS 2 runs use RoboStack Jazzy built for cp314 (`ros2-distro-mutex` 0.20).
+
+With a Host running (`unilab --backend hostlink`), install through its management API. The
+spec is the GitHub URL with an optional `@<commit-sha>`:
+
 ```bash
-unilab package install https://github.com/Xuwznln/LabDeviceComplexWorkflowDemo --ref <commit-sha>
+unilab package install https://github.com/Xuwznln/LabDeviceComplexWorkflowDemo@<commit-sha> --wait
+```
+
+Or install the distribution into the current Python environment (this is what CI does):
+
+```bash
+python -m pip install "git+https://github.com/Xuwznln/LabDeviceComplexWorkflowDemo@<commit-sha>"
 ```
 
 For local development:
@@ -46,7 +61,8 @@ python -m pip install -e .
 
 No AK/SK and no cloud lab are needed. Requires a Uni-Lab-OS build with workflow
 loop containers (`type="loop"` nodes, `ctx.loop_for` / `ctx.loop_while` in
-`@workflow`).
+`@workflow`) and the new `compiler="ast"` condition support.
+HostLink has been verified locally against the unified core; the ROS 2 smoke runs in CI only.
 
 ## Bounded dual-runtime smoke
 
@@ -70,7 +86,7 @@ return_info` is the current attempt, `attempts` embeds the node's full history
 | --- | --- | --- |
 | Fixed-count dispensing | reset 1 · **dispense ×3** (loop) 1 · dispense **3** · report 1 | `additions = ["S-1","S-2","S-3"]` |
 | Wait for temperature | reset 1 · start heating 1 · **wait** (loop, empty body, 4 polls observed) 1 · stop heating 1 · report 1 | `temperature_c = 80` |
-| Polish until ready | reset 1 · **polish until ready** (loop) 1 · polish **2** · probe **2** (ready false → true) · report 1 | `polish_count = 2`, `purity = 0.9` |
+| Polish until ready | reset 1 · **probe ×3** (loop) 1 · probe/condition **3** · confirm **3** (first two skipped) · polish **3** (last skipped) · report 1 | `polish_count = 2`, `purity = 0.9` |
 | Nested plates/wells | reset 1 · **plates ×2** 1 · switch plate **2** · **wells ×3** (inner loop) **2** · fill well **6** · report 1 | `plates = {"1":[1,2,3],"2":[1,2,3]}`, `fill_count = 6` |
 | Complex workflow | reset · dispense ×2 · dispense **2** · start heating · wait · stop heating · polish until ready · polish **2** · probe **2** · report | `additions = ["S-1","S-2"]`, `temperature_c = 80`, `polish_count = 2` |
 
@@ -99,6 +115,23 @@ state fields list the device's latest reported values). The run page draws the
 loop as a frame with "round i/N", and the job list shows one attempt per round.
 
 ## Writing the template
+
+The conditional template uses static compilation; real action results are read at runtime.
+
+```python
+@workflow(display_name="三轮质量检查", compiler="ast")
+def quality_check(ctx):
+    ctx.run("reactor/reset", {})
+    with ctx.loop_for(3):
+        quality = ctx.run("reactor/check_quality", {"threshold": 0.85})
+        if quality.ready:
+            ctx.run("reactor/report", {})
+        else:
+            ctx.run("reactor/polish", {})
+    ctx.run("reactor/report", {})
+```
+
+The original combined workflow keeps the builder mode:
 
 ```python
 from unilabos.registry.workflows import WorkflowBuildContext, workflow
@@ -133,3 +166,43 @@ complex_workflow_demo/
   smoke.py                           bounded real-runtime proof driven through the management API
 tests/test_hostlink_smoke.py         HostLink integration assertions
 ```
+
+
+### 工作流输入输出合同
+
+「循环演示：提纯达标」使用静态注解声明 `threshold` 输入（默认 0.85，范围 0–1，单位 fraction），
+运行前在前端工作流输入区调整。动作参数中的输入引用随流程保留，设备换绑仍由前端实例配置完成。
+末尾返回 `PolishResult`：`purity` 与 `polish_count` 会成为任务的具名输出，并在完成时检查类型与范围。
+HostLink smoke 同时核对默认输入、条件 attempt 历史和最终输出 `{purity: 0.9, polish_count: 2}`。
+
+
+### 持久资源区间验证（统一版核心）
+
+提纯（polish）和质量检测（check_quality）现在使用设备占用，两个动作之间的连续区间
+由调度权威持久保存。其余免锁演示动作保留原有声明。HostLink smoke 除五条流程的
+业务结果外，还核对每次设备尝试的资源准入、结束后的实际使用清单为空，以及取得过
+的区间全部释放。该验证使用虚拟反应釜，不代表真实硬件或多 slave 验收。
+
+
+## 资源借还与设备托管演示
+
+新增 `资源演示：样品托管`：sample 为前端选择的 ResourceSlot 输入，vessel 默认使用可读设备 ID reactor，
+`reactor/load_sample → reactor/process_sample → reactor/unload_sample`。
+图中增加虚拟 sample；装载后任务单步停顿，其他任务仍不能使用设备，卸载成功后才可继续。
+新增 `资源演示：空闲借还`：连续两次检测，第一步结束后显式借出暂停任务的区间，
+借用者执行完后，原任务才能继续第二步。借用异常需要核实后人工归还。
+
+需要统一版 Uni-Lab-OS 核心（持久资源区间、借还与设备托管）。`python -m complex_workflow_demo.smoke --backend hostlink --timeout 120`
+会运行原有五条流程、四次资源场景任务及下述联合结算流程，共十个任务，并对照独立 authority / Host 数据库，
+验证开始许可、资源使用、借还及托管最终状态。该演示使用虚拟设备，不代表真实硬件或多 slave 验收。
+
+
+## 条件库存、托管与实际结算联合演示
+
+配套后端为统一版 Uni-Lab-OS 核心（合并了 [#360](https://github.com/deepmodeling/Uni-Lab-OS/pull/360) 的循环作用域、借还 / 托管、条件库存与物理回执结算，仅支持 CPython 3.14），CI 固定的核心提交见 `.github/workflows/check_registry.yml` 的 `STABLE_CORE_REF`。本地 HostLink 联调结果不替代全新环境安装或 ROS 2 验证。
+
+`联合演示：托管分装与补料` 是 AST `@workflow` 模板。它以 `reactor` 设备 ID 为默认角色，在显式资源作用域里抓取样品、循环两次选择库存来源并分装，最后放回目标库位。前端负责角色换绑和入口资源参数。
+
+`python -m complex_workflow_demo.smoke --backend hostlink --timeout 120` 会启动隔离的 authority + Host，运行原有循环、借还和托管流程，以及新的联合场景：先入库 7 ul，进入缺料等待后补入 20 ul；每轮计划 10 ul、虚拟实测 8 ul，最终来源剩余 84 ul、目标收到 16 ul、库存剩余 11 ul。未选分支不占库存，最终夹爪为空、托管及物理占用均释放。需要包含 material_execution 和跨循环 resource_scope 的统一版核心。
+
+演示中的 pick/place/aliquot 只返回虚拟回执。真实驱动必须报告实际完成量和实际到达的目标库位；运行时不会据计划参数伪造实测值。

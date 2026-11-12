@@ -17,8 +17,9 @@ on:
         type: string
 
 env:
-  # 必须指向包含工作流循环容器（type=loop 节点、@workflow ctx.loop_for / ctx.loop_while）的 Uni-Lab-OS 提交。
-  STABLE_CORE_REF: bbee08f31fc6a2bbda22d71c7c34135a89fa2dd6
+  # 配套 Core PR #360：循环作用域、借还/托管、条件库存及物理回执结算。
+  # 合并前还需 Core 完成 PLR 配套包构建验证；不能回退旧 Core 绕过新合同。
+  STABLE_CORE_REF: a4dc4e6af010b16dcbe22809d696c2122c464bb8
 
 jobs:
   prepare:

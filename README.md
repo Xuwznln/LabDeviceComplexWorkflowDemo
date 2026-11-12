@@ -178,11 +178,13 @@ HostLink smoke 同时核对默认输入、条件 attempt 历史和最终输出 `
 借用者执行完后，原任务才能继续第二步。借用异常需要核实后人工归还。
 
 需要支持 runtime.db v8 的 dev 迁移后端。`python -m complex_workflow_demo.smoke --backend hostlink --timeout 120`
-会运行原有五条流程以及四次资源场景任务，共九个任务，并对照独立 authority / Host 数据库，
+会运行原有五条流程、四次资源场景任务及下述联合结算流程，共十个任务，并对照独立 authority / Host 数据库，
 验证开始许可、资源使用、借还及托管最终状态。该演示使用虚拟设备，不代表真实硬件或多 slave 验收。
 
 
 ## 条件库存、托管与实际结算联合演示
+
+配套后端为 [Uni-Lab-OS #360](https://github.com/deepmodeling/Uni-Lab-OS/pull/360)，当前验证提交 `a4dc4e6af010b16dcbe22809d696c2122c464bb8`，CI 使用同一提交。该 Core 的 PLR 配套包发布校验仍待完成，因此本演示的 PR 保持 Draft；已有 HostLink 联调结果不替代全新环境安装或 ROS 2 验证。
 
 `联合演示：托管分装与补料` 是 AST `@workflow` 模板。它以 `reactor` 设备 ID 为默认角色，在显式资源作用域里抓取样品、循环两次选择库存来源并分装，最后放回目标库位。前端负责角色换绑和入口资源参数。
 

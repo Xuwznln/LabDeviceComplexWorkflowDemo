@@ -25,8 +25,14 @@ def seed(port):
     )
 
     class Client(HTTPMaterialsClient):
-        def _request(self, method, path, body=None):
-            return _api_request(port, "/materials" + path, body, method=method)
+        """经 smoke 的 _api_request 发请求，带上本次运行时的控制面 token。
+
+        统一 Core 的客户端写入一律走 ``POST /inventory/commands``（``root=True``、裸结果
+        ``envelope=False``），读走 ``/inventory/*``；只有 dev 独有的读路由仍在 ``/materials`` 下。
+        """
+
+        def _request(self, method, path, body=None, *, root=False, envelope=True):
+            return _api_request(port, path if root else "/materials" + path, body, method=method, raw=not envelope)
 
     client = Client(f"http://127.0.0.1:{port}")
 
@@ -134,7 +140,7 @@ def run_physical_scenario(port, deadline):
         report = _api_request(port, "/scheduler/inventory-recovery")
         if any(row["task_uuid"] == task["uuid"] for row in report.get("waiting", [])):
             break
-        decisions = _api_request(port, "/error-decisions").get("items", [])
+        decisions = _api_request(port, "/error-decisions")["decisions"]
         assert not decisions, decisions
         current = _api_request(port, f"/workflow-tasks/{task['uuid']}")
         assert current["status"] not in {"failed", "canceled"}, current

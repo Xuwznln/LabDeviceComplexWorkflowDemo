@@ -21,8 +21,21 @@
 
 ## 从 GitHub 安装
 
+需要统一版 Uni-Lab-OS 核心（dev 架构 + V1.0 HTTP API），仅支持 **CPython 3.14**；配套 wheel
+（PyLabRobot 维护分支 `1.0.0b1+unilabos…` 与 `opentrons-shared-data 10.1.0+unilabos.np2.1`）
+用核心的 `scripts/build_wheel_release.py --dependencies-only` 构建，安装时经 `--find-links` 提供。
+ROS 2 运行使用为 cp314 构建的 RoboStack Jazzy（`ros2-distro-mutex` 0.20）。
+
+Host 运行时（`unilab --backend hostlink`）经管理 API 安装，来源是 GitHub 地址，可附 `@<commit-sha>`：
+
 ```bash
-unilab package install https://github.com/Xuwznln/LabDeviceComplexWorkflowDemo --ref <commit-sha>
+unilab package install https://github.com/Xuwznln/LabDeviceComplexWorkflowDemo@<commit-sha> --wait
+```
+
+也可以直接装进当前 Python 环境（CI 即如此）：
+
+```bash
+python -m pip install "git+https://github.com/Xuwznln/LabDeviceComplexWorkflowDemo@<commit-sha>"
 ```
 
 本地开发可使用：
@@ -35,7 +48,7 @@ python -m pip install -e .
 
 本地演示不需要 AK/SK，也不依赖云端实验室。需要包含工作流循环容器的 Uni-Lab-OS 版本
 （`type="loop"` 节点、`ctx.loop_for` / `ctx.loop_while`），以及 `compiler="ast"` 条件支持。
-本地迁移版本的条件流程已通过 HostLink 验证，尚未验证 ROS 2。
+条件流程已在统一版核心上本地通过 HostLink 验证；ROS 2 smoke 只在 CI 中运行。
 
 ## 有终止条件的双运行时 smoke
 
@@ -142,7 +155,7 @@ tests/test_hostlink_smoke.py         HostLink 集成断言
 HostLink smoke 同时核对默认输入、条件 attempt 历史和最终输出 `{purity: 0.9, polish_count: 2}`。
 
 
-### 持久资源区间验证（dev 迁移工作区）
+### 持久资源区间验证（统一版核心）
 
 提纯（polish）和质量检测（check_quality）现在使用设备占用，两个动作之间的连续区间
 由调度权威持久保存。其余免锁演示动作保留原有声明。HostLink smoke 除五条流程的
@@ -158,13 +171,13 @@ HostLink smoke 同时核对默认输入、条件 attempt 历史和最终输出 `
 新增 `资源演示：空闲借还`：连续两次检测，第一步结束后显式借出暂停任务的区间，
 借用者执行完后，原任务才能继续第二步。借用异常需要核实后人工归还。
 
-需要支持 runtime.db v8 的 dev 迁移后端。`python -m complex_workflow_demo.smoke --backend hostlink --timeout 120`
+需要统一版 Uni-Lab-OS 核心（持久资源区间、借还与设备托管）。`python -m complex_workflow_demo.smoke --backend hostlink --timeout 120`
 会运行原有五条流程、四次资源场景任务及下述联合结算流程，共十个任务，并对照独立 authority / Host 数据库，
 验证开始许可、资源使用、借还及托管最终状态。该演示使用虚拟设备，不代表真实硬件或多 slave 验收。
 
 ## 条件库存、托管与实际结算联合演示
 
-配套后端为 [Uni-Lab-OS #360](https://github.com/deepmodeling/Uni-Lab-OS/pull/360)，当前验证提交 `a4dc4e6af010b16dcbe22809d696c2122c464bb8`，CI 使用同一提交。该 Core 的 PLR 配套包发布校验仍待完成，因此本演示的 PR 保持 Draft；已有 HostLink 联调结果不替代全新环境安装或 ROS 2 验证。
+配套后端为统一版 Uni-Lab-OS 核心（合并了 [#360](https://github.com/deepmodeling/Uni-Lab-OS/pull/360) 的循环作用域、借还 / 托管、条件库存与物理回执结算，仅支持 CPython 3.14），CI 固定的核心提交见 `.github/workflows/check_registry.yml` 的 `STABLE_CORE_REF`。本地 HostLink 联调结果不替代全新环境安装或 ROS 2 验证。
 
 `联合演示：托管分装与补料` 使用 AST `@workflow` 和 `reactor` 设备 ID 默认角色。显式作用域覆盖抓取、两轮动态来源与条件分装，以及放回目标库位；设备换绑和入口资源选择由前端负责。
 

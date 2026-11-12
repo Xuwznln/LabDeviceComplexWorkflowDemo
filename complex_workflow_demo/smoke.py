@@ -252,8 +252,29 @@ def _base_command(repo_root: Path, database_root: Path, management_port: int, ba
     return command
 
 
-def _api_request(port: int, path: str, payload: dict[str, Any] | None = None, *, method: str | None = None) -> Any:
-    """请求管理 API；workflow 风格 {"code":0,"data":...} 自动解包，诊断路由原样返回。"""
+#: 统一 Core 的业务码：Host 子进程尚未接入控制面（启动 / 安静点重启）时，Host 专有路由
+#: （如 ``/runtime/endpoints``）返回 HTTP 200 + ``{"code": 5001}``，就绪等待应继续轮询。
+SERVICE_UNAVAILABLE = 5001
+
+
+class ManagementAPIError(RuntimeError):
+    """管理 API 返回了非 0 业务码（V1 信封 ``{"code", "error": {"msg"}}``）。"""
+
+    def __init__(self, path: str, body: dict[str, Any]) -> None:
+        super().__init__(f"管理 API {path} 返回错误: {body}")
+        self.path = path
+        self.code = body.get("code")
+        self.body = body
+
+
+def _api_request(
+    port: int, path: str, payload: dict[str, Any] | None = None, *, method: str | None = None, raw: bool = False
+) -> Any:
+    """请求管理 API；V1 信封 {"code":0,"data":...} 自动解包，非信封路由原样返回。
+
+    ``raw=True`` 不解包：``POST /inventory/commands`` 按 V1 返回裸结果
+    ``{command_id, status, result | error, ...}``，被拒时另带 ``code``，由调用方按 ``status`` 判断。
+    """
 
     url = f"http://127.0.0.1:{port}/api/v1{path}"
     if hasattr(payload, "model_dump"):
@@ -270,9 +291,11 @@ def _api_request(port: int, path: str, payload: dict[str, Any] | None = None, *,
             body = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as error:
         raise RuntimeError(f"管理 API {path} 返回 {error.code}: {error.read().decode('utf-8')}") from error
+    if raw:
+        return body
     if isinstance(body, dict) and "code" in body:
         if body["code"] != 0:
-            raise RuntimeError(f"管理 API {path} 返回错误: {body}")
+            raise ManagementAPIError(path, body)
         return body.get("data")
     return body
 
@@ -297,6 +320,10 @@ def _wait_management_api(port: int, process: subprocess.Popen[Any], deadline: fl
                 and {"reset", "add_reagent", "start_heating", "report"} <= actions
             ):
                 return
+        except ManagementAPIError as error:
+            # 默认拓扑里 Host 是调度权威的子进程，接入控制面前 Host 专有路由返回 5001
+            if error.code != SERVICE_UNAVAILABLE:
+                raise
         except RuntimeError as error:
             if not isinstance(error.__cause__, urllib.error.HTTPError) or error.__cause__.code != 503:
                 raise
@@ -406,6 +433,16 @@ def run_resource_scenarios(port, deadline):
             time.sleep(0.1)
         raise TimeoutError("资源演示动作未完成")
 
+    def tenancies(expected):
+        """读设备托管；动作落 succeeded 后，托管转换（reserved → loaded / released）由调度权威
+        在随后的事务里收敛，所以短暂轮询到期望状态，超时返回最后一次读数交给断言。"""
+
+        held = _api_request(port, "/workflow-device-tenancies")
+        while not expected(held) and time.monotonic() < deadline:
+            time.sleep(0.1)
+            held = _api_request(port, "/workflow-device-tenancies")
+        return held
+
     proof = {}
     name = "资源演示：空闲借还"
     lw, lender = create(name)
@@ -448,7 +485,7 @@ def run_resource_scenarios(port, deadline):
     cw, custody = create(name, values={"sample": {"uuid": sample}, "vessel": "reactor"})
     control(custody, "step")
     wait_steps(custody, 1)
-    held = _api_request(port, "/workflow-device-tenancies")
+    held = tenancies(lambda rows: len(rows) == 1 and rows[0]["state"] == "loaded")
     assert (
         len(held) == 1
         and held[0]["device_key"] == "/devices/reactor"
@@ -462,7 +499,7 @@ def run_resource_scenarios(port, deadline):
     control(custody, "step")
     proof["custody_workflow"] = finish_workflow(port, name, cw, custody, deadline)
     proof["custody_competitor"] = finish_workflow(port, "资源演示：空闲借还", ow, other, deadline)
-    assert _api_request(port, "/workflow-device-tenancies") == []
+    assert tenancies(lambda rows: rows == []) == []
     assert all(value["task_status"] == "succeeded" for value in proof.values()), proof
     return proof
 
@@ -616,4 +653,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    # ``python -m`` 把本文件作为 __main__ 执行，而 physical_smoke 导入的是 complex_workflow_demo.smoke：
+    # 两份模块各自生成 CONTROL_TOKEN，物料命令会带着运行时不认识的 token（401）。统一走包内模块。
+    from complex_workflow_demo.smoke import main as _package_main
+
+    raise SystemExit(_package_main())

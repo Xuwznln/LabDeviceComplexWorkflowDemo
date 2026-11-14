@@ -203,6 +203,6 @@ HostLink smoke 同时核对默认输入、条件 attempt 历史和最终输出 `
 
 `联合演示：托管分装与补料` 是 AST `@workflow` 模板。它以 `reactor` 设备 ID 为默认角色，在显式资源作用域里抓取样品、循环两次选择库存来源并分装，最后放回目标库位。前端负责角色换绑和入口资源参数。
 
-`python -m complex_workflow_demo.smoke --backend hostlink --timeout 120` 会启动隔离的 authority + Host，运行原有循环、借还和托管流程，以及新的联合场景：先入库 7 ul，进入缺料等待后补入 20 ul；每轮计划 10 ul、虚拟实测 8 ul，最终来源剩余 84 ul、目标收到 16 ul、库存剩余 11 ul。未选分支不占库存，最终夹爪为空、托管及物理占用均释放。需要包含 material_execution 和跨循环 resource_scope 的统一版核心。
+`python -m complex_workflow_demo.smoke --backend hostlink --timeout 120` 会启动隔离的 authority + Host，运行原有循环、借还和托管流程，以及新的联合场景：先入库 7 ul，分装动作执行前预检报缺料（待决策清单出现 `preflight` 决策：重试、跳过、人工替换为成功或放弃），补入 20 ul 后重试；每轮计划 10 ul、虚拟实测 8 ul，最终来源剩余 84 ul、目标收到 16 ul、库存剩余 11 ul。未选分支不占库存，最终夹爪为空、托管及物理占用均释放。需要包含 material_execution 和跨循环 resource_scope 的统一版核心。
 
 演示中的 pick/place/aliquot 只返回虚拟回执。真实驱动必须报告实际完成量和实际到达的目标库位；运行时不会据计划参数伪造实测值。

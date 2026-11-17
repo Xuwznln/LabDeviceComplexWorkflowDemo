@@ -25,10 +25,10 @@ def seed(port):
     )
 
     class Client(HTTPMaterialsClient):
-        """经 smoke 的 _api_request 发请求，带上本次运行时的控制面 token。
+        """经 smoke 的 _api_request 发请求（它负责解包 V1 信封）。
 
-        统一 Core 的客户端写入一律走 ``POST /inventory/commands``（``root=True``、裸结果
-        ``envelope=False``），读走 ``/inventory/*``；只有 dev 独有的读路由仍在 ``/materials`` 下。
+        统一 Core 的客户端写入一律走 ``POST /inventory/commands``（``root=True``），读走 ``/inventory/*``；
+        只有 dev 独有的读路由仍在 ``/materials`` 下。
         """
 
         def _request(self, method, path, body=None, *, root=False, envelope=True):

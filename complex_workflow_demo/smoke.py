@@ -16,7 +16,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import secrets
 import sqlite3
 import socket
 import subprocess
@@ -29,12 +28,6 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Any, Sequence
-
-# 新版 Uni-Lab-OS 的管理 API 写请求要求控制面 token。本脚本自己拉起运行时，所以由它决定 token：
-# 经环境变量交给运行时，每个请求都放进 X-UniLab-Token；旧版运行时忽略这个变量和请求头。
-CONTROL_TOKEN_ENV = "UNILABOS_BASICCONFIG_CONTROL_TOKEN"
-CONTROL_TOKEN_HEADER = "X-UniLab-Token"
-CONTROL_TOKEN = os.environ.get(CONTROL_TOKEN_ENV, "").strip() or secrets.token_urlsafe(24)
 
 #: 与 complex_workflow_demo/workflows.py 保持一致（smoke 独立运行，不 import 设备包）。
 FOR_WORKFLOW_NAME = "循环演示：定次加样"
@@ -282,8 +275,7 @@ def _api_request(
 ) -> Any:
     """请求管理 API；V1 信封 {"code":0,"data":...} 自动解包，非信封路由原样返回。
 
-    ``raw=True`` 不解包：``POST /inventory/commands`` 按 V1 返回裸结果
-    ``{command_id, status, result | error, ...}``，被拒时另带 ``code``，由调用方按 ``status`` 判断。
+    ``raw=True`` 不解包，原样返回整个信封。
     """
 
     url = f"http://127.0.0.1:{port}/api/v1{path}"
@@ -292,7 +284,6 @@ def _api_request(
     data = None if payload is None else json.dumps(payload).encode("utf-8")
     # GET 不能带 JSON Content-Type：服务端 Backend 路由会尝试解码空 body 而报错
     headers = {} if payload is None else {"Content-Type": "application/json"}
-    headers[CONTROL_TOKEN_HEADER] = CONTROL_TOKEN
     request = urllib.request.Request(
         url, data=data, headers=headers, method=method or ("GET" if payload is None else "POST")
     )
@@ -601,7 +592,6 @@ def run_smoke(backend: str = "hostlink", timeout: float = 60.0) -> dict[str, Any
         root = Path(directory)
         log_path = root / "runtime.log"
         environment = os.environ.copy()
-        environment[CONTROL_TOKEN_ENV] = CONTROL_TOKEN
         environment["PYTHONUNBUFFERED"] = "1"
         management_port = _free_port()
         command = _base_command(repo_root, root / "db", management_port, backend)
@@ -659,7 +649,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 if __name__ == "__main__":
     # ``python -m`` 把本文件作为 __main__ 执行，而 physical_smoke 导入的是 complex_workflow_demo.smoke：
-    # 两份模块各自生成 CONTROL_TOKEN，物料命令会带着运行时不认识的 token（401）。统一走包内模块。
+    # 统一走包内模块，进程里只有一份模块状态。
     from complex_workflow_demo.smoke import main as _package_main
 
     raise SystemExit(_package_main())

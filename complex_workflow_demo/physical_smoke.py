@@ -136,23 +136,28 @@ def run_physical_scenario(port, deadline):
     task = _api_request(
         port, "/workflow-tasks", {"workflow_uuid": workflow["uuid"], "run_mode": "normal", "input": values}
     )
+    decision = None
     while time.monotonic() < deadline:
-        report = _api_request(port, "/scheduler/inventory-recovery")
-        if any(row["task_uuid"] == task["uuid"] for row in report.get("waiting", [])):
-            break
         decisions = _api_request(port, "/error-decisions")["decisions"]
-        assert not decisions, decisions
+        decision = next((item for item in decisions if item.get("task_id") == task["uuid"]), None)
+        if decision is not None:
+            break
         current = _api_request(port, f"/workflow-tasks/{task['uuid']}")
         assert current["status"] not in {"failed", "canceled"}, current
         time.sleep(0.2)
     else:
-        raise TimeoutError("没有进入预期的等待补料")
+        raise TimeoutError("没有出现预期的动作执行前预检报错（缺料）")
+    # 缺料是分装动作执行前的预检报错：动作没有派发，补料后重试（也可跳过、人工替换为成功或放弃）
+    assert decision["category"] == "preflight", decision
+    assert [option["action"] for option in decision["options"]] == ["retry", "skip", "operator_intervention", "abort"], decision
+    assert decision["error_info"][0]["code"] == "inventory_shortage", decision
     sample = values["sample"]["uuid"]
     assert client.get_material(values["carrier"]["uuid"]).sites[0].occupied_material_uuid == sample
     held = _api_request(port, "/workflow-device-tenancies")
     assert any(row["task_uuid"] == task["uuid"] and row["state"] == "loaded" for row in held), held
     assert not client.list_inventory_reservations(task_uuid=task["uuid"])
     replenish(20)
+    _api_request(port, f"/error-decisions/{decision['decision_id']}", {"action": "retry", "reason": "已补料 20 ul"})
     proof = finish_workflow(port, NAME, workflow, task, deadline)
     assert proof["task_status"] == "succeeded", proof
     assert client.get_material(values["origin"]["uuid"]).sites[0].occupied_material_uuid is None

@@ -262,7 +262,7 @@ def idle_lending(ctx: WorkflowBuildContext) -> None:
     guide=WorkflowGuide(
         preparation=["由 physical_smoke 初始化样品、来源库位、目标库位和库存。"],
         expected=[
-            "抓取后样品托管在 reactor 夹爪；缺料时停在待派发，补料后两轮各实测 8 ul。",
+            "抓取后样品托管在 reactor 夹爪；缺料时分装动作报执行前预检错误（待决策），补料后重试，两轮各实测 8 ul。",
             "样品放回目标库位；来源剩余 84 ul，目标收到 16 ul，库存按 16 ul 实际量结算。",
         ],
         notes=["整个循环由显式 reactor 作用域覆盖；设备 ID 绑定由前端实例化控制。接入真实设备时须替换虚拟回执。 "],

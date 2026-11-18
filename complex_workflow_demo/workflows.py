@@ -7,7 +7,7 @@ host 启动时主仓 AST 扫描发现本模块，模板随注册表上报（``GE
 1. 「循环演示：定次加样」——``for`` 固定 3 轮，循环体参数用 ``{{loop.iteration}}`` 生成样品编号；
 2. 「循环演示：等待升温」——``while`` 对**设备状态** ``reactor.temperature_c < 80`` 判定，循环体为空
    （每 0.5 s 判定一次，"等到某状态"），设备在后台升温；
-3. 「循环演示：提纯达标」——静态 AST 编译原生 ``if/else``：三轮检测，未达标则提纯，
+3. 「循环演示：提纯达标」——按源码静态编译原生 ``if/else``：三轮检测，未达标则提纯，
    达标则确认；三个检测结果为 false / false / true，未选分支记录 skipped；
 4. 「循环演示：嵌套板孔」——两层 ``for``：外层切换板、内层给孔加样，各自的 ``{{loop.iteration}}``
    取最内层；
@@ -123,11 +123,10 @@ def wait_for_temperature(ctx: WorkflowBuildContext) -> None:
 
 @workflow(
     display_name=UNTIL_WORKFLOW_NAME,
-    compiler="ast",
     description="复位 -> 三轮检测：未达标则提纯，达标则确认 -> 汇总（预期提纯两次，纯度 0.9）",
-    tags=["complex-workflow", "loop-for", "condition", "ast"],
+    tags=["complex-workflow", "loop-for", "condition"],
     guide=WorkflowGuide(
-        preparation=["确认虚拟反应釜 reactor 在线；需要支持 compiler=ast 的框架版本。"],
+        preparation=["确认虚拟反应釜 reactor 在线。"],
         expected=[
             "三轮检测 ready 分别为 false、false、true；条件节点保存每轮 matched 结果。",
             "「未达标提纯」前两轮 succeeded，第三轮 skipped；「达标确认」恰好相反。",
@@ -240,7 +239,7 @@ def complex_workflow(ctx: WorkflowBuildContext) -> None:
 from unilabos.registry.placeholder_type import ResourceSlot
 
 
-@workflow(display_name="资源演示：样品托管", compiler="ast", tags=["resource-custody"])
+@workflow(display_name="资源演示：样品托管", tags=["resource-custody"])
 def sample_custody(ctx: WorkflowBuildContext, *, sample: ResourceSlot, vessel: str = "reactor") -> None:
     """设备绑定使用 reactor；样品和目标设备由调用方提供参数。"""
     ctx.run("reactor/load_sample", {"sample": sample, "vessel": vessel}, name="装载样品")
@@ -248,7 +247,7 @@ def sample_custody(ctx: WorkflowBuildContext, *, sample: ResourceSlot, vessel: s
     ctx.run("reactor/unload_sample", {"sample": sample, "vessel": vessel}, name="卸载样品")
 
 
-@workflow(display_name="资源演示：空闲借还", compiler="ast", tags=["resource-loan"])
+@workflow(display_name="资源演示：空闲借还", tags=["resource-loan"])
 def idle_lending(ctx: WorkflowBuildContext) -> None:
     """两次连续设备占用；单步执行第一次后可显式借出空闲区间。"""
     ctx.run("reactor/check_quality", {}, name="借出前检测")
@@ -257,7 +256,6 @@ def idle_lending(ctx: WorkflowBuildContext) -> None:
 
 @workflow(
     display_name="联合演示：托管分装与补料",
-    compiler="ast",
     tags=["inventory", "physical", "resource-scope"],
     guide=WorkflowGuide(
         preparation=["由 physical_smoke 初始化样品、来源库位、目标库位和库存。"],

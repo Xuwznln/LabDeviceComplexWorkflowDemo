@@ -197,6 +197,22 @@ HostLink smoke 同时核对默认输入、条件 attempt 历史和最终输出 `
 会运行原有五条流程、四次资源场景任务及下述联合结算流程，共十个任务，并对照独立 authority / Host 数据库，
 验证开始许可、资源使用、借还及托管最终状态。该演示使用虚拟设备，不代表真实硬件或多 slave 验收。
 
+这些动作的资源语义写在 `@action` 的一个字段 `material=` 里（`reactor.py`）：
+
+```python
+@action(display_name="装载样品", material=Material.load("sample", device="vessel"))
+def load_sample(self, sample: ResourceSlot, vessel: str) -> CustodyResult: ...
+
+@action(display_name="原位处理", material=Material.in_place("sample"))
+@action(display_name="卸载样品", material=Material.unload("sample", device="vessel"))
+@action(display_name="抓取到夹爪", material=Material.pick("sample", owner="owner", site="site", carriers=["carrier"]))
+@action(display_name="放回目标库位", material=Material.place("sample", owner="owner", site="site", carriers=["carrier"]))
+@action(display_name="按实测量分装", material=Material.aliquot(source="source", targets=["target"]))
+```
+
+字符串都是参数名，注册时对照签名检查。参数与返回值按签名和返回注解校验（所有动作同一标准，核心文档
+`docs/developer_guide/action_standard.md`）。
+
 
 ## 条件库存、托管与实际结算联合演示
 

@@ -21,7 +21,7 @@ import threading
 import time
 from typing import Any, Dict, List, Optional, TypedDict
 
-from unilabos.registry.decorators import action, device, not_action, topic_config, resource
+from unilabos.registry.decorators import Material, action, device, not_action, topic_config, resource
 
 from unilabos.registry.placeholder_type import ResourceSlot
 from unilabos.registry.annotations import JSONValue
@@ -88,73 +88,34 @@ class VirtualReactorDemo:
         self._heater: Optional[threading.Thread] = None
         self._reset_state()
 
-    @action(
-        contract="typed",
-        always_free=False,
-        display_name="装载样品",
-        resource_contract={
-            "version": 1,
-            "device_tenancy": {
-                "mode": "task_while_loaded",
-                "material_param": "sample",
-                "acquire_device_param": "vessel",
-            },
-        },
-    )
+    @action(always_free=False, display_name="装载样品", material=Material.load("sample", device="vessel"))
     def load_sample(self, sample: ResourceSlot, vessel: str) -> CustodyResult:
         if getattr(self, "_sample_loaded", False):
             raise RuntimeError("设备中已有样品")
         self._sample_loaded = True
         return {"loaded": True}
 
-    @action(
-        contract="typed",
-        always_free=False,
-        display_name="原位处理",
-        resource_contract={"version": 2, "operate_in_place": {"material_param": "sample"}},
-    )
+    @action(always_free=False, display_name="原位处理", material=Material.in_place("sample"))
     def process_sample(self, sample: ResourceSlot) -> CustodyResult:
         if not getattr(self, "_sample_loaded", False):
             raise RuntimeError("设备中没有样品")
         return {"loaded": True}
 
-    @action(
-        contract="typed",
-        always_free=False,
-        display_name="卸载样品",
-        resource_contract={
-            "version": 1,
-            "device_tenancy": {
-                "mode": "task_while_loaded",
-                "material_param": "sample",
-                "release_device_param": "vessel",
-            },
-        },
-    )
+    @action(always_free=False, display_name="卸载样品", material=Material.unload("sample", device="vessel"))
     def unload_sample(self, sample: ResourceSlot, vessel: str) -> CustodyResult:
         if not getattr(self, "_sample_loaded", False):
             raise RuntimeError("设备中没有样品")
         self._sample_loaded = False
         return {"loaded": False}
 
-    @action(contract="typed", display_name="选择演示来源")
+    @action(display_name="选择演示来源")
     def select_source(self, lot: str) -> SourceSelection:
         return {"lot": lot, "quantity": 10.0}
 
     @action(
-        contract="typed",
         always_free=False,
         display_name="抓取到夹爪",
-        resource_contract={
-            "version": 2,
-            "transfer_step": {
-                "operation": "pick",
-                "material_param": "sample",
-                "owner_param": "owner",
-                "site_param": "site",
-                "carrier_params": ["carrier"],
-            },
-        },
+        material=Material.pick("sample", owner="owner", site="site", carriers=["carrier"]),
     )
     def pick(
         self, sample: ResourceSlot, owner: ResourceSlot, site: str, carrier: ResourceSlot, gripper_site: str
@@ -170,19 +131,9 @@ class VirtualReactorDemo:
         }
 
     @action(
-        contract="typed",
         always_free=False,
         display_name="放回目标库位",
-        resource_contract={
-            "version": 2,
-            "transfer_step": {
-                "operation": "place",
-                "material_param": "sample",
-                "owner_param": "owner",
-                "site_param": "site",
-                "carrier_params": ["carrier"],
-            },
-        },
+        material=Material.place("sample", owner="owner", site="site", carriers=["carrier"]),
     )
     def place(self, sample: ResourceSlot, owner: ResourceSlot, site: str, carrier: ResourceSlot) -> TransferResult:
         return {
@@ -196,13 +147,9 @@ class VirtualReactorDemo:
         }
 
     @action(
-        contract="typed",
         always_free=False,
         display_name="按实测量分装",
-        resource_contract={
-            "version": 2,
-            "aliquot": {"source_material_param": "source", "target_material_params": ["target"]},
-        },
+        material=Material.aliquot(source="source", targets=["target"]),
     )
     def aliquot(self, source: ResourceSlot, target: ResourceSlot, solvent: dict[str, JSONValue]) -> AliquotResult:
         # 虚拟设备模拟计划 10 ul、实测 8 ul；驱动仅回报实测事实，由权威统一结算。

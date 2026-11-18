@@ -17,8 +17,8 @@ into a realistic procedure:
   the body is empty, the condition reads the reported `temperature_c` every 0.5 s
   while the device heats up in the background at 30 °C/s — the "wait until a state"
   idiom;
-- **native `if/else` on an action result**: `compiler="ast"` statically compiles
-  `if quality.ready`. Three measurements return false / false / true; only the
+- **native `if/else` on an action result**: the workflow source is compiled statically,
+  so `if quality.ready` becomes a condition on the action's result. Three measurements return false / false / true; only the
   selected branch executes, and the other branch records `skipped`;
 - **nested `for`**: the outer loop switches plates, the inner loop fills wells;
   `{{loop.iteration}}` refers to the innermost loop, and the inner loop node is
@@ -61,7 +61,7 @@ python -m pip install -e .
 
 No AK/SK and no cloud lab are needed. Requires a Uni-Lab-OS build with workflow
 loop containers (`type="loop"` nodes, `ctx.loop_for` / `ctx.loop_while` in
-`@workflow`) and the new `compiler="ast"` condition support.
+`@workflow`) and native `if/elif/else` on action results in `@workflow` source.
 HostLink has been verified locally against the unified core; the ROS 2 smoke runs in CI only.
 
 ## Bounded dual-runtime smoke
@@ -116,10 +116,11 @@ loop as a frame with "round i/N", and the job list shows one attempt per round.
 
 ## Writing the template
 
-The conditional template uses static compilation; real action results are read at runtime.
+Templates are compiled statically from source (the function body is never executed);
+real action results are read at runtime.
 
 ```python
-@workflow(display_name="三轮质量检查", compiler="ast")
+@workflow(display_name="三轮质量检查")
 def quality_check(ctx):
     ctx.run("reactor/reset", {})
     with ctx.loop_for(3):
@@ -131,7 +132,7 @@ def quality_check(ctx):
     ctx.run("reactor/report", {})
 ```
 
-The original combined workflow keeps the builder mode:
+The original combined workflow is compiled the same way:
 
 ```python
 from unilabos.registry.workflows import WorkflowBuildContext, workflow
@@ -201,7 +202,7 @@ HostLink smoke 同时核对默认输入、条件 attempt 历史和最终输出 `
 
 配套后端为统一版 Uni-Lab-OS 核心（合并了 [#360](https://github.com/deepmodeling/Uni-Lab-OS/pull/360) 的循环作用域、借还 / 托管、条件库存与物理回执结算，仅支持 CPython 3.14），CI 固定的核心提交见 `.github/workflows/check_registry.yml` 的 `STABLE_CORE_REF`。本地 HostLink 联调结果不替代全新环境安装或 ROS 2 验证。
 
-`联合演示：托管分装与补料` 是 AST `@workflow` 模板。它以 `reactor` 设备 ID 为默认角色，在显式资源作用域里抓取样品、循环两次选择库存来源并分装，最后放回目标库位。前端负责角色换绑和入口资源参数。
+`联合演示：托管分装与补料` 是 `@workflow` 模板。它以 `reactor` 设备 ID 为默认角色，在显式资源作用域里抓取样品、循环两次选择库存来源并分装，最后放回目标库位。前端负责角色换绑和入口资源参数。
 
 `python -m complex_workflow_demo.smoke --backend hostlink --timeout 120` 会启动隔离的 authority + Host，运行原有循环、借还和托管流程，以及新的联合场景：先入库 7 ul，分装动作执行前预检报缺料（待决策清单出现 `preflight` 决策：重试、跳过、人工替换为成功或放弃），补入 20 ul 后重试；每轮计划 10 ul、虚拟实测 8 ul，最终来源剩余 84 ul、目标收到 16 ul、库存剩余 11 ul。未选分支不占库存，最终夹爪为空、托管及物理占用均释放。需要包含 material_execution 和跨循环 resource_scope 的统一版核心。
 

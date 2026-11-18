@@ -10,8 +10,8 @@
   S-1 / S-2 / S-3；整个参数值恰为占位符时保持数字类型，嵌在文本里做替换；
 - **`while` 判定设备状态**（`ctx.device_state("reactor", "temperature_c", "<", 80)`）：循环体为空，
   每 0.5 s 读一次设备上报的 `temperature_c`，设备在后台以 30 ℃/s 升温——这是「等到某状态」的写法；
-- **原生 `if/else` 判定节点返回值**：`compiler="ast"` 静态编译 `if quality.ready`，三轮检测
-  依次为 false / false / true；未达标才提纯，达标则确认，未选分支记录 `skipped`；
+- **原生 `if/else` 判定节点返回值**：工作流按源码静态编译，`if quality.ready` 成为对动作结果的
+  条件判断，三轮检测依次为 false / false / true；未达标才提纯，达标则确认，未选分支记录 `skipped`；
 - **嵌套 `for`**：外层切换板、内层给孔加样，`{{loop.iteration}}` 取最内层；内层循环节点随外层每轮
   重新执行；
 - **组合**：加样 ×2 → 后台升温并等到 80 ℃ → 提纯直到达标 → 汇总。
@@ -47,7 +47,7 @@ python -m pip install -e .
 ```
 
 本地演示不需要 AK/SK，也不依赖云端实验室。需要包含工作流循环容器的 Uni-Lab-OS 版本
-（`type="loop"` 节点、`ctx.loop_for` / `ctx.loop_while`），以及 `compiler="ast"` 条件支持。
+（`type="loop"` 节点、`ctx.loop_for` / `ctx.loop_while`），以及 `@workflow` 源码里按动作结果的原生 `if/elif/else`。
 条件流程已在统一版核心上本地通过 HostLink 验证；ROS 2 smoke 只在 CI 中运行。
 
 ## 有终止条件的双运行时 smoke
@@ -96,10 +96,10 @@ python -m unilabos --backend ros2 --disable_hostlink --skip_env_check \
 
 ## 模板怎么写
 
-条件流程用静态编译：不执行函数体，运行时才读取真实动作结果。
+模板按源码静态编译：不执行函数体，运行时才读取真实动作结果。
 
 ```python
-@workflow(display_name="三轮质量检查", compiler="ast")
+@workflow(display_name="三轮质量检查")
 def quality_check(ctx):
     ctx.run("reactor/reset", {})
     with ctx.loop_for(3):
@@ -111,7 +111,7 @@ def quality_check(ctx):
     ctx.run("reactor/report", {})
 ```
 
-下面的原有复杂流程继续使用 builder 模式：
+下面的原有复杂流程同样按源码静态编译：
 
 ```python
 from unilabos.registry.workflows import WorkflowBuildContext, workflow
@@ -179,7 +179,7 @@ HostLink smoke 同时核对默认输入、条件 attempt 历史和最终输出 `
 
 配套后端为统一版 Uni-Lab-OS 核心（合并了 [#360](https://github.com/deepmodeling/Uni-Lab-OS/pull/360) 的循环作用域、借还 / 托管、条件库存与物理回执结算，仅支持 CPython 3.14），CI 固定的核心提交见 `.github/workflows/check_registry.yml` 的 `STABLE_CORE_REF`。本地 HostLink 联调结果不替代全新环境安装或 ROS 2 验证。
 
-`联合演示：托管分装与补料` 使用 AST `@workflow` 和 `reactor` 设备 ID 默认角色。显式作用域覆盖抓取、两轮动态来源与条件分装，以及放回目标库位；设备换绑和入口资源选择由前端负责。
+`联合演示：托管分装与补料` 使用 `@workflow` 模板和 `reactor` 设备 ID 默认角色。显式作用域覆盖抓取、两轮动态来源与条件分装，以及放回目标库位；设备换绑和入口资源选择由前端负责。
 
 运行上面的 smoke 命令会先入库 7 ul，分装动作执行前预检报缺料（待决策清单出现 `preflight` 决策：重试、跳过、人工替换为成功或放弃），补入 20 ul 后重试；每轮计划 10 ul、虚拟实测 8 ul。最终来源剩余 84 ul、目标收到 16 ul、库存剩余 11 ul；未选分支不预留，夹爪、托管和物理占用全部释放。
 

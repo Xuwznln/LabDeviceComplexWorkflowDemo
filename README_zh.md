@@ -90,7 +90,8 @@ python -m unilabos --backend ros2 --disable_hostlink --skip_env_check \
   -g ./graph/complex_workflow_demo.json
 ```
 
-然后打开管理页面：在「工作流模板」里插入任一条「循环演示」模板运行，或在编辑器里自己包一个循环——
+然后打开连接本后端的前端（`unilab` 本身不提供页面，`http://127.0.0.1:8002/` 上有 OpenLab 入口）：
+在「工作流模板」里插入任一条「循环演示」模板运行，或在编辑器里自己包一个循环——
 选中几个节点右键「包成循环…」，选 for / while 并填条件（设备状态字段会列出设备最近上报的值）；
 运行页的循环框显示「第 i/N 轮」，节点作业列表里每一轮是一个 attempt。
 
@@ -140,10 +141,13 @@ def complex_workflow(ctx: WorkflowBuildContext) -> None:
 ```text
 graph/complex_workflow_demo.json     两种 backend 共用的一份图（一台虚拟反应釜 reactor）
 complex_workflow_demo/
-  reactor.py                         虚拟反应釜：加样 / 后台升温 / 提纯检测 / 板孔加样 / 汇总
-  workflows.py                       五条 @workflow 循环模板
+  reactor.py                         虚拟反应釜：加样 / 后台升温 / 提纯检测 / 板孔加样 / 汇总，以及托管、搬运与分装动作
+  workflows.py                       五条循环模板与三条资源模板（@workflow）
   smoke.py                           经管理 API 驱动的有终止条件真实运行时证明
+  physical_smoke.py                  smoke.py 最后运行的托管 / 分装 / 补料联合场景
 tests/test_hostlink_smoke.py         HostLink 集成断言
+tests/test_workflow_template_contract.py  模板导入合同（不起运行时）
+tests/test_action_selectors.py       注册表：库位与设备参数得到库位 / 设备选择器
 ```
 
 
@@ -171,7 +175,7 @@ HostLink smoke 同时核对默认输入、条件 attempt 历史和最终输出 `
 新增 `资源演示：空闲借还`：连续两次检测，第一步结束后显式借出暂停任务的区间，
 借用者执行完后，原任务才能继续第二步。借用异常需要核实后人工归还。
 
-需要统一版 Uni-Lab-OS 核心（持久资源区间、借还与设备托管）。`python -m complex_workflow_demo.smoke --backend hostlink --timeout 120`
+需要统一版 Uni-Lab-OS 核心（持久资源区间、借还与设备托管）。`python -m complex_workflow_demo.smoke --backend hostlink --timeout 90`
 会运行原有五条流程、四次资源场景任务及下述联合结算流程，共十个任务，并对照独立 authority / Host 数据库，
 验证开始许可、资源使用、借还及托管最终状态。该演示使用虚拟设备，不代表真实硬件或多 slave 验收。
 
@@ -179,23 +183,33 @@ HostLink smoke 同时核对默认输入、条件 attempt 历史和最终输出 `
 
 ```python
 @action(display_name="装载样品", material=Material.load("sample", device="vessel"))
-def load_sample(self, sample: ResourceSlot, vessel: str) -> CustodyResult: ...
+def load_sample(self, sample: ResourceSlot, vessel: DeviceSlot) -> CustodyResult: ...
 
 @action(display_name="原位处理", material=Material.in_place("sample"))
 @action(display_name="卸载样品", material=Material.unload("sample", device="vessel"))
+
 @action(display_name="抓取到夹爪", material=Material.pick("sample", owner="owner", site="site", carriers=["carrier"]))
+def pick(self, sample: ResourceSlot, owner: ResourceSlot, site: SiteSlot,
+         carrier: ResourceSlot, gripper_site: SiteSlot) -> TransferResult: ...
+
 @action(display_name="放回目标库位", material=Material.place("sample", owner="owner", site="site", carriers=["carrier"]))
+def place(self, sample: ResourceSlot, owner: ResourceSlot, site: SiteSlot, carrier: ResourceSlot) -> TransferResult: ...
+
 @action(display_name="按实测量分装", material=Material.aliquot(source="source", targets=["target"]))
 ```
 
 字符串都是参数名，注册时对照签名检查。参数与返回值按签名和返回注解校验（所有动作同一标准，核心文档
 `docs/developer_guide/action_standard.md`）。
 
+参数类型决定编辑器里的选择器：`ResourceSlot` 是物料选择器并加物料锁，`SiteSlot` 是库位选择器（值为 site uuid），
+`DeviceSlot` 是设备选择器（值为设备 ID）；库位与设备参数不加锁。工作流输入只支持基础类型与 `ResourceSlot`，
+所以模板输入 `vessel` 和 `origin_site` / `target_site` / `gripper_site` 仍是 `str`，再传给上述参数。
+
 ## 条件库存、托管与实际结算联合演示
 
 配套后端为统一版 Uni-Lab-OS 核心（合并了 [#360](https://github.com/deepmodeling/Uni-Lab-OS/pull/360) 的循环作用域、借还 / 托管、条件库存与物理回执结算，仅支持 CPython 3.14），CI 固定的核心提交见 `.github/workflows/check_registry.yml` 的 `STABLE_CORE_REF`。本地 HostLink 联调结果不替代全新环境安装或 ROS 2 验证。
 
-`联合演示：托管分装与补料` 使用 `@workflow` 模板和 `reactor` 设备 ID 默认角色。显式作用域覆盖抓取、两轮动态来源与条件分装，以及放回目标库位；设备换绑和入口资源选择由前端负责。
+`联合演示：托管分装与补料` 使用 `@workflow` 模板和 `reactor` 设备 ID 默认角色。显式作用域覆盖抓取、两轮动态来源与条件分装，以及放回目标库位；设备换绑和入口资源选择由前端负责。`pick.site`、`pick.gripper_site` 与 `place.site` 绑定到工作流输入，真实 site uuid 随任务 `input` 提交，所以脚本导入该模板时传 `"site_binding_mode": "preserve"`（与浏览器相同）；默认的 `resolve` 会把输入引用当作库位标签去解析而失败。
 
 运行上面的 smoke 命令会先入库 7 ul，分装动作执行前预检报缺料（待决策清单出现 `preflight` 决策：重试、跳过、人工替换为成功或放弃），补入 20 ul 后重试；每轮计划 10 ul、虚拟实测 8 ul。最终来源剩余 84 ul、目标收到 16 ul、库存剩余 11 ul；未选分支不预留，夹爪、托管和物理占用全部释放。
 

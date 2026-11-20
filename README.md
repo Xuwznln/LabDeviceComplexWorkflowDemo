@@ -108,7 +108,8 @@ python -m unilabos --backend ros2 --disable_hostlink --skip_env_check \
   -g ./graph/complex_workflow_demo.json
 ```
 
-Then open the management UI: insert one of the loop templates from the template
+Then open a frontend connected to this backend (`unilab` serves no UI itself; the
+page at `http://127.0.0.1:8002/` links OpenLab): insert one of the loop templates from the template
 panel and run it, or build your own loop in the editor — select a few nodes,
 right-click "Wrap in loop…", pick for / while and fill in the condition (device
 state fields list the device's latest reported values). The run page draws the
@@ -162,64 +163,113 @@ step by **name** and resolves it when the block closes.
 ```text
 graph/complex_workflow_demo.json     one graph for both backends (a single virtual reactor "reactor")
 complex_workflow_demo/
-  reactor.py                         virtual reactor: dispense / background heating / polish & probe / plate wells / report
-  workflows.py                       five @workflow loop templates
+  reactor.py                         virtual reactor: dispense / background heating / polish & probe / plate wells / report,
+                                     plus the custody, transfer and aliquot actions
+  workflows.py                       five loop templates and three resource templates (@workflow)
   smoke.py                           bounded real-runtime proof driven through the management API
+  physical_smoke.py                  the joint custody / aliquot / restock scenario that smoke.py runs last
 tests/test_hostlink_smoke.py         HostLink integration assertions
+tests/test_workflow_template_contract.py  template import contract (no runtime)
+tests/test_action_selectors.py       registry: site and device parameters get Site / device pickers
 ```
 
 
-### 工作流输入输出合同
+### Workflow inputs and outputs
 
-「循环演示：提纯达标」使用静态注解声明 `threshold` 输入（默认 0.85，范围 0–1，单位 fraction），
-运行前在前端工作流输入区调整。动作参数中的输入引用随流程保留，设备换绑仍由前端实例配置完成。
-末尾返回 `PolishResult`：`purity` 与 `polish_count` 会成为任务的具名输出，并在完成时检查类型与范围。
-HostLink smoke 同时核对默认输入、条件 attempt 历史和最终输出 `{purity: 0.9, polish_count: 2}`。
-
-
-### 持久资源区间验证（统一版核心）
-
-提纯（polish）和质量检测（check_quality）现在使用设备占用，两个动作之间的连续区间
-由调度权威持久保存。其余免锁演示动作保留原有声明。HostLink smoke 除五条流程的
-业务结果外，还核对每次设备尝试的资源准入、结束后的实际使用清单为空，以及取得过
-的区间全部释放。该验证使用虚拟反应釜，不代表真实硬件或多 slave 验收。
+"循环演示：提纯达标" declares a `threshold` input with a static annotation (default 0.85, range
+0–1, unit fraction); adjust it in the frontend's workflow input area before a run. Input
+references in action parameters stay in the flow; rebinding devices is still done in the
+frontend instance configuration. The template returns `PolishResult`: `purity` and
+`polish_count` become the task's named outputs and are checked for type and range on
+completion. The HostLink smoke also checks the default input, the condition attempt history
+and the final output `{purity: 0.9, polish_count: 2}`.
 
 
-## 资源借还与设备托管演示
+### Durable resource intervals (unified core)
 
-新增 `资源演示：样品托管`：sample 为前端选择的 ResourceSlot 输入，vessel 默认使用可读设备 ID reactor，
-`reactor/load_sample → reactor/process_sample → reactor/unload_sample`。
-图中增加虚拟 sample；装载后任务单步停顿，其他任务仍不能使用设备，卸载成功后才可继续。
-新增 `资源演示：空闲借还`：连续两次检测，第一步结束后显式借出暂停任务的区间，
-借用者执行完后，原任务才能继续第二步。借用异常需要核实后人工归还。
+Polish (`polish`) and quality check (`check_quality`) occupy the device, and the scheduling
+authority persists the interval between the two actions. The other demo actions keep their
+lock-free declarations. Besides the results of the five workflows, the HostLink smoke checks
+each device attempt's resource admission, that the in-use list is empty afterwards, and that
+every acquired interval is released. This uses the virtual reactor; it is not a real-hardware
+or multi-slave acceptance.
 
-需要统一版 Uni-Lab-OS 核心（持久资源区间、借还与设备托管）。`python -m complex_workflow_demo.smoke --backend hostlink --timeout 120`
-会运行原有五条流程、四次资源场景任务及下述联合结算流程，共十个任务，并对照独立 authority / Host 数据库，
-验证开始许可、资源使用、借还及托管最终状态。该演示使用虚拟设备，不代表真实硬件或多 slave 验收。
 
-这些动作的资源语义写在 `@action` 的一个字段 `material=` 里（`reactor.py`）：
+## Resource lending and device custody
+
+`资源演示：样品托管`: `sample` is a ResourceSlot input picked in the frontend, `vessel` defaults to
+the readable device ID `reactor`;
+`reactor/load_sample → reactor/process_sample → reactor/unload_sample`.
+The graph holds a virtual sample. After loading, the task pauses in single-step mode, other
+tasks still cannot use the device, and they can continue only after unloading succeeds.
+`资源演示：空闲借还`: two consecutive checks; after the first step the paused task's interval is
+lent explicitly, and the original task continues with the second step only after the borrower
+has finished. A failed loan has to be checked and returned by hand.
+
+Requires the unified Uni-Lab-OS core (durable resource intervals, lending and device custody).
+`python -m complex_workflow_demo.smoke --backend hostlink --timeout 90` runs the five original
+workflows, four resource-scenario tasks and the joint settlement workflow below, ten tasks in
+all, and checks start permits, resource use, loans and the final custody state against the
+separate authority / Host databases. The demo uses virtual devices; it is not a real-hardware
+or multi-slave acceptance.
+
+The resource semantics of these actions are one `@action` field, `material=` (`reactor.py`):
 
 ```python
 @action(display_name="装载样品", material=Material.load("sample", device="vessel"))
-def load_sample(self, sample: ResourceSlot, vessel: str) -> CustodyResult: ...
+def load_sample(self, sample: ResourceSlot, vessel: DeviceSlot) -> CustodyResult: ...
 
 @action(display_name="原位处理", material=Material.in_place("sample"))
 @action(display_name="卸载样品", material=Material.unload("sample", device="vessel"))
+
 @action(display_name="抓取到夹爪", material=Material.pick("sample", owner="owner", site="site", carriers=["carrier"]))
+def pick(self, sample: ResourceSlot, owner: ResourceSlot, site: SiteSlot,
+         carrier: ResourceSlot, gripper_site: SiteSlot) -> TransferResult: ...
+
 @action(display_name="放回目标库位", material=Material.place("sample", owner="owner", site="site", carriers=["carrier"]))
+def place(self, sample: ResourceSlot, owner: ResourceSlot, site: SiteSlot, carrier: ResourceSlot) -> TransferResult: ...
+
 @action(display_name="按实测量分装", material=Material.aliquot(source="source", targets=["target"]))
 ```
 
-字符串都是参数名，注册时对照签名检查。参数与返回值按签名和返回注解校验（所有动作同一标准，核心文档
-`docs/developer_guide/action_standard.md`）。
+The strings are parameter names, checked against the signature at registration. Parameters
+and return values are validated against the signature and the return annotation (one standard
+for every action; core doc `docs/developer_guide/action_standard.md`).
+
+The parameter type picks the editor's selector: `ResourceSlot` gives a material picker and a
+material lock, `SiteSlot` a Site picker (the value is a site UUID) and `DeviceSlot` a device
+picker (the value is a device ID). Site and device parameters take no lock. Workflow inputs
+accept only basic types and `ResourceSlot`, so the template inputs `vessel` and
+`origin_site` / `target_site` / `gripper_site` stay `str` and are passed on to those parameters.
 
 
-## 条件库存、托管与实际结算联合演示
+## Joint demo: conditional inventory, custody and actual settlement
 
-配套后端为统一版 Uni-Lab-OS 核心（合并了 [#360](https://github.com/deepmodeling/Uni-Lab-OS/pull/360) 的循环作用域、借还 / 托管、条件库存与物理回执结算，仅支持 CPython 3.14），CI 固定的核心提交见 `.github/workflows/check_registry.yml` 的 `STABLE_CORE_REF`。本地 HostLink 联调结果不替代全新环境安装或 ROS 2 验证。
+The backend is the unified Uni-Lab-OS core (with
+[#360](https://github.com/deepmodeling/Uni-Lab-OS/pull/360): loop scopes, lending / custody,
+conditional inventory and physical receipt settlement; CPython 3.14 only). The core commit CI
+pins is `STABLE_CORE_REF` in `.github/workflows/check_registry.yml`. Local HostLink runs do
+not replace a fresh install or ROS 2 verification.
 
-`联合演示：托管分装与补料` 是 `@workflow` 模板。它以 `reactor` 设备 ID 为默认角色，在显式资源作用域里抓取样品、循环两次选择库存来源并分装，最后放回目标库位。前端负责角色换绑和入口资源参数。
+`联合演示：托管分装与补料` is a `@workflow` template. It uses the device ID `reactor` as its
+default role and, inside an explicit resource scope, picks the sample, selects an inventory
+source and aliquots in two rounds, then places the sample on the target site. The frontend
+handles role rebinding and the entry resource parameters. `pick.site`, `pick.gripper_site`
+and `place.site` are bound to the workflow inputs, and the real site UUIDs arrive with the
+task `input`. A script therefore imports the template with
+`"site_binding_mode": "preserve"`, as the browser does; with the default `resolve` the import
+treats the input references as Site labels and fails.
 
-`python -m complex_workflow_demo.smoke --backend hostlink --timeout 120` 会启动隔离的 authority + Host，运行原有循环、借还和托管流程，以及新的联合场景：先入库 7 ul，分装动作执行前预检报缺料（待决策清单出现 `preflight` 决策：重试、跳过、人工替换为成功或放弃），补入 20 ul 后重试；每轮计划 10 ul、虚拟实测 8 ul，最终来源剩余 84 ul、目标收到 16 ul、库存剩余 11 ul。未选分支不占库存，最终夹爪为空、托管及物理占用均释放。需要包含 material_execution 和跨循环 resource_scope 的统一版核心。
+`python -m complex_workflow_demo.smoke --backend hostlink --timeout 90` starts an isolated
+authority + Host and runs the original loop, lending and custody workflows plus the joint
+scenario. It first stocks 7 ul; the aliquot action's preflight reports a shortage before the
+action is dispatched (the pending decision list shows a `preflight` decision: retry, skip,
+operator replacement with success, or abort); after restocking 20 ul it retries. Each round
+plans 10 ul and the virtual measurement is 8 ul, leaving 84 ul at the source, 16 ul at the
+target and 11 ul in stock. The unselected branch reserves no stock; at the end the gripper is
+empty and custody and physical occupancy are released. Requires a unified core with
+material_execution and cross-loop resource_scope.
 
-演示中的 pick/place/aliquot 只返回虚拟回执。真实驱动必须报告实际完成量和实际到达的目标库位；运行时不会据计划参数伪造实测值。
+The demo's pick/place/aliquot return only virtual receipts. A real driver must report the
+amount actually done and the site actually reached; the runtime does not fabricate
+measurements from the planned parameters.

@@ -239,15 +239,26 @@ def complex_workflow(ctx: WorkflowBuildContext) -> None:
 from unilabos.registry.placeholder_type import ResourceSlot
 
 
-@workflow(display_name="资源演示：样品托管", tags=["resource-custody"])
+@workflow(
+    display_name="资源演示：样品托管",
+    description="装载样品（任务开始托管 reactor）-> 原位处理 -> 卸载样品（结束托管）；托管期间其他任务不能使用该设备",
+    tags=["resource-custody"],
+)
 def sample_custody(ctx: WorkflowBuildContext, *, sample: ResourceSlot, vessel: str = "reactor") -> None:
-    """设备绑定使用 reactor；样品和目标设备由调用方提供参数。"""
+    """设备绑定使用 reactor；样品和目标设备由调用方提供参数。
+
+    工作流输入只支持基础类型与 ResourceSlot，vessel 输入仍是 str；动作参数 vessel 是 DeviceSlot。
+    """
     ctx.run("reactor/load_sample", {"sample": sample, "vessel": vessel}, name="装载样品")
     ctx.run("reactor/process_sample", {"sample": sample}, name="原位处理")
     ctx.run("reactor/unload_sample", {"sample": sample, "vessel": vessel}, name="卸载样品")
 
 
-@workflow(display_name="资源演示：空闲借还", tags=["resource-loan"])
+@workflow(
+    display_name="资源演示：空闲借还",
+    description="两次连续检测占用 reactor；单步执行第一次后，可把两步之间的空闲区间借给其他任务，归还后再继续",
+    tags=["resource-loan"],
+)
 def idle_lending(ctx: WorkflowBuildContext) -> None:
     """两次连续设备占用；单步执行第一次后可显式借出空闲区间。"""
     ctx.run("reactor/check_quality", {}, name="借出前检测")
@@ -256,6 +267,7 @@ def idle_lending(ctx: WorkflowBuildContext) -> None:
 
 @workflow(
     display_name="联合演示：托管分装与补料",
+    description="抓取样品到 reactor 夹爪 -> 两轮按库存来源分装（缺料时预检报错，补料后重试）-> 放回目标库位，按实测量结算",
     tags=["inventory", "physical", "resource-scope"],
     guide=WorkflowGuide(
         preparation=["由 physical_smoke 初始化样品、来源库位、目标库位和库存。"],
@@ -274,6 +286,7 @@ def physical_inventory(
     origin: ResourceSlot,
     destination: ResourceSlot,
     carrier: ResourceSlot,
+    # 库位输入传给 pick / place 的 SiteSlot 参数，值是 site_uuid；工作流输入不支持 SiteSlot 注解，这里保持 str。
     origin_site: str,
     target_site: str,
     gripper_site: str,

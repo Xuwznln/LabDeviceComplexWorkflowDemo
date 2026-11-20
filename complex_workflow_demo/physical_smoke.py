@@ -130,9 +130,14 @@ def seed(port):
 def run_physical_scenario(port, deadline):
     client, values, replenish = seed(port)
     template = _find_template(port, NAME, deadline)
-    workflow = _api_request(port, "/workflows/from-template", {"template_uuid": template["uuid"], "bindings": {}})[
-        "workflow"
-    ]
+    # pick/place 的库位参数是 SiteSlot，在模板里绑定到工作流输入 origin_site / target_site / gripper_site，
+    # 真实 site_uuid 随任务 input 提交。导入时按 preserve 保存（与浏览器插入模板相同）：resolve 会把这些
+    # 输入引用当成待绑定的库位标签，报「请绑定物料及 Site」。
+    workflow = _api_request(
+        port,
+        "/workflows/from-template",
+        {"template_uuid": template["uuid"], "bindings": {}, "site_binding_mode": "preserve"},
+    )["workflow"]
     task = _api_request(
         port, "/workflow-tasks", {"workflow_uuid": workflow["uuid"], "run_mode": "normal", "input": values}
     )

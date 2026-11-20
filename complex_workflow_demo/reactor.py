@@ -23,7 +23,7 @@ from typing import Any, Dict, List, Optional, TypedDict
 
 from unilabos.registry.decorators import Material, action, device, not_action, topic_config, resource
 
-from unilabos.registry.placeholder_type import ResourceSlot
+from unilabos.registry.placeholder_type import DeviceSlot, ResourceSlot, SiteSlot
 from unilabos.registry.annotations import JSONValue
 from pylabrobot.resources import Resource
 
@@ -89,7 +89,7 @@ class VirtualReactorDemo:
         self._reset_state()
 
     @action(always_free=False, display_name="装载样品", material=Material.load("sample", device="vessel"))
-    def load_sample(self, sample: ResourceSlot, vessel: str) -> CustodyResult:
+    def load_sample(self, sample: ResourceSlot, vessel: DeviceSlot) -> CustodyResult:
         if getattr(self, "_sample_loaded", False):
             raise RuntimeError("设备中已有样品")
         self._sample_loaded = True
@@ -102,7 +102,7 @@ class VirtualReactorDemo:
         return {"loaded": True}
 
     @action(always_free=False, display_name="卸载样品", material=Material.unload("sample", device="vessel"))
-    def unload_sample(self, sample: ResourceSlot, vessel: str) -> CustodyResult:
+    def unload_sample(self, sample: ResourceSlot, vessel: DeviceSlot) -> CustodyResult:
         if not getattr(self, "_sample_loaded", False):
             raise RuntimeError("设备中没有样品")
         self._sample_loaded = False
@@ -118,7 +118,7 @@ class VirtualReactorDemo:
         material=Material.pick("sample", owner="owner", site="site", carriers=["carrier"]),
     )
     def pick(
-        self, sample: ResourceSlot, owner: ResourceSlot, site: str, carrier: ResourceSlot, gripper_site: str
+        self, sample: ResourceSlot, owner: ResourceSlot, site: SiteSlot, carrier: ResourceSlot, gripper_site: SiteSlot
     ) -> TransferResult:
         return {
             "material_transfer_receipts": [
@@ -135,7 +135,7 @@ class VirtualReactorDemo:
         display_name="放回目标库位",
         material=Material.place("sample", owner="owner", site="site", carriers=["carrier"]),
     )
-    def place(self, sample: ResourceSlot, owner: ResourceSlot, site: str, carrier: ResourceSlot) -> TransferResult:
+    def place(self, sample: ResourceSlot, owner: ResourceSlot, site: SiteSlot, carrier: ResourceSlot) -> TransferResult:
         return {
             "material_transfer_receipts": [
                 {

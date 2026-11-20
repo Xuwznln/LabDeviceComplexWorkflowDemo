@@ -46,7 +46,12 @@ class CustodyResult(TypedDict):
     loaded: bool
 
 
-@resource(id="custody_demo_sample", category=["virtual_resource"], display_name="托管演示样品")
+@resource(
+    id="custody_demo_sample",
+    category=["virtual_resource"],
+    description="托管 / 搬运 / 分装演示用的虚拟样品：只有物料身份，没有工艺含义",
+    display_name="托管演示样品",
+)
 def custody_demo_sample(name: str = "sample") -> Resource:
     return Resource(name=name, size_x=10, size_y=10, size_z=10)
 
@@ -88,38 +93,88 @@ class VirtualReactorDemo:
         self._heater: Optional[threading.Thread] = None
         self._reset_state()
 
-    @action(always_free=False, display_name="装载样品", material=Material.load("sample", device="vessel"))
+    @action(
+        always_free=False,
+        display_name="装载样品",
+        description="把样品装进设备；任务托管该设备直到「卸载样品」，期间其他任务不能使用它",
+        material=Material.load("sample", device="vessel"),
+    )
     def load_sample(self, sample: ResourceSlot, vessel: DeviceSlot) -> CustodyResult:
+        """装载样品并开始设备托管。
+
+        Args:
+            sample[样品]: 要装进设备的样品物料。
+            vessel[托管设备]: 装入样品、由任务托管的设备 ID（模板默认 reactor）。
+        """
         if getattr(self, "_sample_loaded", False):
             raise RuntimeError("设备中已有样品")
         self._sample_loaded = True
         return {"loaded": True}
 
-    @action(always_free=False, display_name="原位处理", material=Material.in_place("sample"))
+    @action(
+        always_free=False,
+        display_name="原位处理",
+        description="处理仍在设备内的样品；设备里没有样品则报错",
+        material=Material.in_place("sample"),
+    )
     def process_sample(self, sample: ResourceSlot) -> CustodyResult:
+        """原位处理已装载的样品。
+
+        Args:
+            sample[样品]: 已经装进本设备的样品物料。
+        """
         if not getattr(self, "_sample_loaded", False):
             raise RuntimeError("设备中没有样品")
         return {"loaded": True}
 
-    @action(always_free=False, display_name="卸载样品", material=Material.unload("sample", device="vessel"))
+    @action(
+        always_free=False,
+        display_name="卸载样品",
+        description="把样品从设备取出，结束任务对该设备的托管",
+        material=Material.unload("sample", device="vessel"),
+    )
     def unload_sample(self, sample: ResourceSlot, vessel: DeviceSlot) -> CustodyResult:
+        """卸载样品并结束设备托管。
+
+        Args:
+            sample[样品]: 要从设备取出的样品物料。
+            vessel[托管设备]: 装载时托管的设备 ID。
+        """
         if not getattr(self, "_sample_loaded", False):
             raise RuntimeError("设备中没有样品")
         self._sample_loaded = False
         return {"loaded": False}
 
-    @action(display_name="选择演示来源")
+    @action(
+        display_name="选择演示来源",
+        description="原样回报库存批次与每轮计划量 10 ul，供后续分装节点的库存需求引用",
+    )
     def select_source(self, lot: str) -> SourceSelection:
+        """选择本轮分装的库存来源。
+
+        Args:
+            lot[库存批次]: 库存 lot 的 uuid。
+        """
         return {"lot": lot, "quantity": 10.0}
 
     @action(
         always_free=False,
         display_name="抓取到夹爪",
+        description="搬运第一步：把样品从来源物料的库位抓到搬运器的库位；只回报虚拟回执",
         material=Material.pick("sample", owner="owner", site="site", carriers=["carrier"]),
     )
     def pick(
         self, sample: ResourceSlot, owner: ResourceSlot, site: SiteSlot, carrier: ResourceSlot, gripper_site: SiteSlot
     ) -> TransferResult:
+        """抓取样品。
+
+        Args:
+            sample[样品]: 被搬运的样品物料。
+            owner[来源物料]: 样品当前所在库位的所属物料。
+            site[来源库位]: owner 上放着样品的库位（site_uuid）。
+            carrier[搬运器]: 接收样品的搬运器物料（如 reactor/gripper）。
+            gripper_site[搬运器库位]: carrier 上接收样品的库位（site_uuid）。
+        """
         return {
             "material_transfer_receipts": [
                 {
@@ -133,9 +188,18 @@ class VirtualReactorDemo:
     @action(
         always_free=False,
         display_name="放回目标库位",
+        description="搬运第二步：把样品从搬运器放到目标物料的库位；只回报虚拟回执",
         material=Material.place("sample", owner="owner", site="site", carriers=["carrier"]),
     )
     def place(self, sample: ResourceSlot, owner: ResourceSlot, site: SiteSlot, carrier: ResourceSlot) -> TransferResult:
+        """放回样品。
+
+        Args:
+            sample[样品]: 被搬运的样品物料。
+            owner[目标物料]: 目标库位的所属物料。
+            site[目标库位]: owner 上接收样品的库位（site_uuid）。
+            carrier[搬运器]: 当前持有样品的搬运器物料。
+        """
         return {
             "material_transfer_receipts": [
                 {
@@ -149,9 +213,17 @@ class VirtualReactorDemo:
     @action(
         always_free=False,
         display_name="按实测量分装",
+        description="从来源物料分装到目标物料：计划 10 ul、虚拟实测 8 ul，只回报实测回执，由权威结算",
         material=Material.aliquot(source="source", targets=["target"]),
     )
     def aliquot(self, source: ResourceSlot, target: ResourceSlot, solvent: dict[str, JSONValue]) -> AliquotResult:
+        """按实测量分装。
+
+        Args:
+            source[来源物料]: 被分出液体的物料。
+            target[目标物料]: 接收液体的物料。
+            solvent[试剂分配]: 由调度器按节点库存需求 key=solvent 注入：``{"quantity", "unit", "lots": [{"lot_uuid", "quantity"}]}``。
+        """
         # 虚拟设备模拟计划 10 ul、实测 8 ul；驱动仅回报实测事实，由权威统一结算。
         total = solvent["quantity"]
         return {

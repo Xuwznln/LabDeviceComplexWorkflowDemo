@@ -223,10 +223,10 @@ def load_sample(self, sample: ResourceSlot, vessel: DeviceSlot) -> CustodyResult
 @action(display_name="卸载样品", material=Material.unload("sample", device="vessel"))
 
 @action(display_name="抓取到夹爪", material=Material.pick("sample", from_site="from_site"))
-def pick(self, sample: ResourceSlot, from_site: SiteSlot) -> TransferResult: ...
+def pick(self, sample: ResourceSlot, from_site: SiteSlot) -> None: ...
 
 @action(display_name="放回目标库位", material=Material.place("sample", to_site="to_site"))
-def place(self, sample: ResourceSlot, to_site: SiteSlot) -> TransferResult: ...
+def place(self, sample: ResourceSlot, to_site: SiteSlot) -> None: ...
 
 @action(display_name="按实测量分装", material=Material.dispense(from_material="source", to_materials=["target"]))
 ```
@@ -236,8 +236,8 @@ and return values are validated against the signature and the return annotation 
 for every action; core doc `docs/developer_guide/action_standard.md`).
 
 `pick` / `place` / `dispense` declare real material actions: the core settles the sample's
-location from the transfer receipt and the contents from the aliquot receipt, so the driver
-never writes the location itself. The owner of `from_site` / `to_site` is derived from the
+location from the declaration frozen at dispatch (the driver returns no transfer receipt) and the
+contents from the aliquot receipt, so the driver never writes the location itself. The owner of `from_site` / `to_site` is derived from the
 site, and the carrier is the executing device (`carrier_device=` omitted): the reactor has one
 `meta_data.role == "gripper"` site (`available_sites` on `@device`, `grip` in the graph), and the
 sample sits on it between `pick` and `place` while the task holds the reactor. `load` /
@@ -278,6 +278,6 @@ target and 11 ul in stock. The unselected branch reserves no stock; at the end t
 empty and custody and physical occupancy are released. Requires a unified core with
 material_execution and cross-loop resource_scope.
 
-The demo's pick/place/aliquot return only virtual receipts. A real driver must report the
-amount actually done and the site actually reached; the runtime does not fabricate
-measurements from the planned parameters.
+The demo's aliquot returns only a virtual measured receipt, and pick/place return nothing (the
+core settles the declared move when the action succeeds). A real driver must report the amount
+actually done; the runtime does not fabricate measurements from the planned parameters.

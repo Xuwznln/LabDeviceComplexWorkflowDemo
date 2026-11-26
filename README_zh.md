@@ -189,10 +189,10 @@ def load_sample(self, sample: ResourceSlot, vessel: DeviceSlot) -> CustodyResult
 @action(display_name="卸载样品", material=Material.unload("sample", device="vessel"))
 
 @action(display_name="抓取到夹爪", material=Material.pick("sample", from_site="from_site"))
-def pick(self, sample: ResourceSlot, from_site: SiteSlot) -> TransferResult: ...
+def pick(self, sample: ResourceSlot, from_site: SiteSlot) -> None: ...
 
 @action(display_name="放回目标库位", material=Material.place("sample", to_site="to_site"))
-def place(self, sample: ResourceSlot, to_site: SiteSlot) -> TransferResult: ...
+def place(self, sample: ResourceSlot, to_site: SiteSlot) -> None: ...
 
 @action(display_name="按实测量分装", material=Material.dispense(from_material="source", to_materials=["target"]))
 ```
@@ -200,7 +200,7 @@ def place(self, sample: ResourceSlot, to_site: SiteSlot) -> TransferResult: ...
 字符串都是参数名，注册时对照签名检查。参数与返回值按签名和返回注解校验（所有动作同一标准，核心文档
 `docs/developer_guide/action_standard.md`）。
 
-`pick` / `place` / `dispense` 声明的是真实的物料动作：样品位置由核心按搬运回执结算、内容物按分装回执结算，驱动不自己写位置。
+`pick` / `place` / `dispense` 声明的是真实的物料动作：样品位置由核心按派发前冻结的声明结算（驱动不交搬运回执），内容物按分装回执结算，驱动不自己写位置。
 `from_site` / `to_site` 的所属物料由库位决定；搬运设备省略（不写 `carrier_device=`）即执行设备：reactor 有唯一一个
 `meta_data.role == "gripper"` 的库位（`@device` 的 `available_sites`，图里的 `grip`），`pick` 到 `place` 之间样品在这个库位上、
 任务托管 reactor。`load` / `unload` / `in_place` 是实验性功能，注册时告警一次；`device=` 是 `DeviceSlot` 参数，省略即执行设备。
@@ -217,4 +217,4 @@ def place(self, sample: ResourceSlot, to_site: SiteSlot) -> TransferResult: ...
 
 运行上面的 smoke 命令会先入库 7 ul，分装动作执行前预检报缺料（待决策清单出现 `preflight` 决策：重试、跳过、人工替换为成功或放弃），补入 20 ul 后重试；每轮计划 10 ul、虚拟实测 8 ul。最终来源剩余 84 ul、目标收到 16 ul、库存剩余 11 ul；未选分支不预留，夹爪、托管和物理占用全部释放。
 
-pick/place/aliquot（`Material.pick` / `place` / `dispense`）返回虚拟实测回执。真实驱动必须报告实际完成量与实际到达的目标库位，不能用计划参数替代实测。
+aliquot（`Material.dispense`）返回虚拟实测回执；pick/place（`Material.pick` / `place`）不返回内容，动作成功后由核心按声明结算位置。真实驱动必须报告实际完成量，不能用计划参数替代实测。

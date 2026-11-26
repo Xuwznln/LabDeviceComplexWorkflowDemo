@@ -28,10 +28,6 @@ from unilabos.registry.annotations import JSONValue
 from pylabrobot.resources import Resource
 
 
-class TransferResult(TypedDict):
-    material_transfer_receipts: list[dict[str, JSONValue]]
-
-
 class AliquotResult(TypedDict):
     material_aliquot_receipts: list[dict[str, JSONValue]]
     inventory_consumptions: list[dict[str, JSONValue]]
@@ -60,34 +56,6 @@ def custody_demo_sample(name: str = "sample") -> Resource:
 INITIAL_TEMPERATURE_C = 20.0
 INITIAL_PURITY = 0.4
 PURITY_STEP = 0.25
-#: 搬运设备上夹爪库位的固定角色（``Material.pick`` / ``place`` 省略 carrier_device 时用执行设备的这个库位）。
-GRIPPER_ROLE = "gripper"
-
-
-def _materials() -> Any:
-    from unilabos.resources.materials import resolve_materials_gateway
-
-    return resolve_materials_gateway()
-
-
-def _gripper_site(device_id: str) -> tuple[str, str]:
-    """执行设备的 ``(设备物料 uuid, 夹爪库位 uuid)``：设备上唯一 ``meta_data.role == "gripper"`` 的库位。"""
-
-    aggregate = _materials().get_material_by_resource_id(device_id)
-    sites = [site for site in aggregate.sites if (site.meta_data or {}).get("role") == GRIPPER_ROLE]
-    if len(sites) != 1:
-        raise RuntimeError(f"设备 {device_id} 必须有唯一的夹爪库位（meta_data.role={GRIPPER_ROLE}）")
-    return aggregate.material.material_uuid, sites[0].site_uuid
-
-
-def _site_owner(site_uuid: str) -> str:
-    """库位 uuid → 所属物料 uuid（搬运回执要写目标所属方，所属方由库位决定）。"""
-
-    facts = _materials().site_admission_facts({"site_uuids": [site_uuid]})
-    site = ((facts or {}).get("sites") or {}).get(site_uuid) or {}
-    if not site.get("exists") or not site.get("owner_material_uuid"):
-        raise RuntimeError(f"库位 {site_uuid} 不存在")
-    return str(site["owner_material_uuid"])
 
 
 @device(
@@ -196,10 +164,10 @@ class VirtualReactorDemo:
     @action(
         always_free=False,
         display_name="抓取到夹爪",
-        description="两步搬运第一步：把样品从来源库位抓到本设备的夹爪库位；只回报虚拟回执，位置由核心结算",
+        description="两步搬运第一步：把样品从来源库位抓到本设备的夹爪库位；位置由核心按声明结算，驱动不交搬运回执",
         material=Material.pick("sample", from_site="from_site"),
     )
-    def pick(self, sample: ResourceSlot, from_site: SiteSlot) -> TransferResult:
+    def pick(self, sample: ResourceSlot, from_site: SiteSlot) -> None:
         """抓取样品。
 
         搬运设备省略即执行设备（本设备）：样品抓到本设备 ``meta_data.role == "gripper"`` 的夹爪库位，
@@ -209,31 +177,20 @@ class VirtualReactorDemo:
             sample[样品]: 被搬运的样品物料。
             from_site[来源库位]: 样品当前所在的库位（site_uuid）；必须与物料权威记录的位置一致。
         """
-        owner, grip = _gripper_site(self.device_id)
-        return {
-            "material_transfer_receipts": [
-                {"material_uuid": sample.unilabos_uuid, "target_owner_uuid": owner, "target_site_uuid": grip}
-            ]
-        }
 
     @action(
         always_free=False,
         display_name="放回目标库位",
-        description="两步搬运第二步：把样品从本设备的夹爪库位放到目标库位；只回报虚拟回执，位置由核心结算",
+        description="两步搬运第二步：把样品从本设备的夹爪库位放到目标库位；位置由核心按声明结算，驱动不交搬运回执",
         material=Material.place("sample", to_site="to_site"),
     )
-    def place(self, sample: ResourceSlot, to_site: SiteSlot) -> TransferResult:
+    def place(self, sample: ResourceSlot, to_site: SiteSlot) -> None:
         """放回样品。
 
         Args:
             sample[样品]: 被搬运的样品物料（此刻在本设备的夹爪库位上）。
             to_site[目标库位]: 接收样品的库位（site_uuid）；所属物料由库位决定。
         """
-        return {
-            "material_transfer_receipts": [
-                {"material_uuid": sample.unilabos_uuid, "target_owner_uuid": _site_owner(to_site), "target_site_uuid": to_site}
-            ]
-        }
 
     @action(
         always_free=False,

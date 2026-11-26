@@ -27,8 +27,8 @@ def test_site_and_device_parameters_get_frontend_selectors():
     actions = _reactor_actions()
     resource, site, device = "unilabos_resources", "unilabos_sites", "unilabos_devices"
     expected = {
-        "pick": {"sample": resource, "owner": resource, "site": site, "carrier": resource, "gripper_site": site},
-        "place": {"sample": resource, "owner": resource, "site": site, "carrier": resource},
+        "pick": {"sample": resource, "from_site": site},
+        "place": {"sample": resource, "to_site": site},
         "load_sample": {"sample": resource, "vessel": device},
         "unload_sample": {"sample": resource, "vessel": device},
     }
@@ -40,7 +40,7 @@ def test_site_and_device_parameters_get_frontend_selectors():
             if selector != resource:
                 # 库位 UUID / 设备 ID 都是字符串：值的形态不变，只换前端选择器
                 assert goal[parameter]["type"] == "string", (name, parameter, goal[parameter])
-        # 物料锁只落在物料参数上，库位与设备参数不加锁
+        # 物料锁只落在物料参数上；设备参数（DeviceSlot）由调度器加设备锁、库位参数（SiteSlot）加库位锁，不进物料锁
         locked = sorted(key for key, value in selectors.items() if value == resource)
         assert sorted(action["materials_need_lock"]) == locked, (name, action["materials_need_lock"])
 
@@ -59,8 +59,8 @@ def test_physical_template_import_keeps_site_inputs_for_the_task(monkeypatch):
             return {"workflow": {"uuid": "workflow"}}
         raise Submitted(path)
 
-    values = {"origin_site": "origin-site-uuid", "target_site": "target-site-uuid", "gripper_site": "gripper-site-uuid"}
-    monkeypatch.setattr(physical_smoke, "seed", lambda port: (None, values, None))
+    values = {"origin_site": "origin-site-uuid", "target_site": "target-site-uuid"}
+    monkeypatch.setattr(physical_smoke, "seed", lambda port: (None, values, None, {}))
     monkeypatch.setattr(physical_smoke, "_find_template", lambda port, name, deadline: {"uuid": "template"})
     monkeypatch.setattr(physical_smoke, "_api_request", api)
     with pytest.raises(Submitted, match="/workflow-tasks"):

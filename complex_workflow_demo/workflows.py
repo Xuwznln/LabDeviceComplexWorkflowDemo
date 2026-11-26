@@ -283,22 +283,14 @@ def physical_inventory(
     *,
     sample: ResourceSlot,
     source: ResourceSlot,
-    origin: ResourceSlot,
-    destination: ResourceSlot,
-    carrier: ResourceSlot,
-    # 库位输入传给 pick / place 的 SiteSlot 参数，值是 site_uuid；工作流输入不支持 SiteSlot 注解，这里保持 str。
+    # 库位输入传给 pick / place 的 SiteSlot 参数，值是 site_uuid；所属物料由库位决定，搬运设备省略即 reactor 自身。
     origin_site: str,
     target_site: str,
-    gripper_site: str,
     lot: str,
 ) -> None:
     with ctx.resource_scope("reactor", name="抓取到放回"):
         ctx.run("reactor/reset", {}, name="复位")
-        ctx.run(
-            "reactor/pick",
-            {"sample": sample, "owner": origin, "site": origin_site, "carrier": carrier, "gripper_site": gripper_site},
-            name="抓取样品",
-        )
+        ctx.run("reactor/pick", {"sample": sample, "from_site": origin_site}, name="抓取样品")
         with ctx.loop_for(2, name="分装两轮"):
             selection = ctx.run("reactor/select_source", {"lot": lot}, name="动态选择来源")
             quality = ctx.run("reactor/check_quality", {}, name="选择条件")
@@ -333,8 +325,4 @@ def physical_inventory(
                         }
                     ],
                 )
-        ctx.run(
-            "reactor/place",
-            {"sample": sample, "owner": destination, "site": target_site, "carrier": carrier},
-            name="放回样品",
-        )
+        ctx.run("reactor/place", {"sample": sample, "to_site": target_site}, name="放回样品")

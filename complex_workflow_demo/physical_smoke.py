@@ -98,12 +98,6 @@ def seed(port):
     source = client.create_tree(
         mutation("create_material_tree"), MaterialTreeCreate(nodes=[node("source", amount=100)])
     ).data
-    reactor = client.get_material_by_resource_id("reactor")
-    carrier = next(
-        item
-        for item in client.get_tree(reactor.material.material_uuid).nodes
-        if item.material.resource_id == "reactor/gripper"
-    )
     lot = str(uuid4())
 
     def replenish(quantity):
@@ -116,21 +110,31 @@ def seed(port):
     values = {
         "sample": {"uuid": original.client_ref_map["sample"]},
         "source": {"uuid": source.root_material_uuid},
-        "origin": {"uuid": original.root_material_uuid},
-        "destination": {"uuid": destination.root_material_uuid},
-        "carrier": {"uuid": carrier.material.material_uuid},
         "origin_site": client.get_material(original.root_material_uuid).sites[0].site_uuid,
         "target_site": client.get_material(destination.root_material_uuid).sites[0].site_uuid,
-        "gripper_site": carrier.sites[0].site_uuid,
         "lot": lot,
     }
-    return client, values, replenish
+    # 两端所属物料由库位决定，不进任务输入；只用于下面核对结算结果
+    owners = {"origin": original.root_material_uuid, "destination": destination.root_material_uuid}
+    return client, values, replenish, owners
+
+
+def _gripper(client):
+    """reactor 自身唯一 ``meta_data.role == "gripper"`` 的夹爪库位（pick / place 省略搬运设备即执行设备）。"""
+
+    reactor = client.get_material_by_resource_id("reactor")
+    (site,) = [item for item in reactor.sites if (item.meta_data or {}).get("role") == "gripper"]
+    return reactor.material.material_uuid, site.site_uuid
+
+
+def _occupant(client, owner_uuid, site_uuid):
+    return next(site for site in client.get_material(owner_uuid).sites if site.site_uuid == site_uuid).occupied_material_uuid
 
 
 def run_physical_scenario(port, deadline):
-    client, values, replenish = seed(port)
+    client, values, replenish, owners = seed(port)
     template = _find_template(port, NAME, deadline)
-    # pick/place 的库位参数是 SiteSlot，在模板里绑定到工作流输入 origin_site / target_site / gripper_site，
+    # pick/place 的库位参数是 SiteSlot，在模板里绑定到工作流输入 origin_site / target_site，
     # 真实 site_uuid 随任务 input 提交。导入时按 preserve 保存（与浏览器插入模板相同）：resolve 会把这些
     # 输入引用当成待绑定的库位标签，报「请绑定物料及 Site」。
     workflow = _api_request(
@@ -157,7 +161,9 @@ def run_physical_scenario(port, deadline):
     assert [option["action"] for option in decision["options"]] == ["retry", "skip", "operator_intervention", "abort"], decision
     assert decision["error_info"][0]["code"] == "inventory_shortage", decision
     sample = values["sample"]["uuid"]
-    assert client.get_material(values["carrier"]["uuid"]).sites[0].occupied_material_uuid == sample
+    # pick 之后样品在 reactor 的夹爪库位上，任务托管 reactor
+    reactor, grip = _gripper(client)
+    assert _occupant(client, reactor, grip) == sample
     held = _api_request(port, "/workflow-device-tenancies")
     assert any(row["task_uuid"] == task["uuid"] and row["state"] == "loaded" for row in held), held
     assert not client.list_inventory_reservations(task_uuid=task["uuid"])
@@ -165,9 +171,10 @@ def run_physical_scenario(port, deadline):
     _api_request(port, f"/error-decisions/{decision['decision_id']}", {"action": "retry", "reason": "已补料 20 ul"})
     proof = finish_workflow(port, NAME, workflow, task, deadline)
     assert proof["task_status"] == "succeeded", proof
-    assert client.get_material(values["origin"]["uuid"]).sites[0].occupied_material_uuid is None
-    assert client.get_material(values["carrier"]["uuid"]).sites[0].occupied_material_uuid is None
-    assert client.get_material(values["destination"]["uuid"]).sites[0].occupied_material_uuid == sample
+    # place 之后样品在目标库位、夹爪空出
+    assert client.get_material(owners["origin"]).sites[0].occupied_material_uuid is None
+    assert _occupant(client, reactor, grip) is None
+    assert client.get_material(owners["destination"]).sites[0].occupied_material_uuid == sample
     assert client.get_material(values["source"]["uuid"]).data.substances[0].quantity == 84
     assert client.get_material(sample).data.substances[0].quantity == 16
     lot = client.get_inventory_lot(values["lot"])

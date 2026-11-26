@@ -10,7 +10,32 @@
       "class": "virtual_reactor_demo",
       "template_name": "virtual_reactor_demo",
       "sites_initialized": true,
-      "sites": [],
+      "sites": [
+        {
+          "schema_version": 1,
+          "uuid": "5c2e7d90-4b1f-4a83-9e6a-000000003004",
+          "template_name": "virtual_reactor_demo",
+          "material_uuid": "5c2e7d90-4b1f-4a83-9e6a-000000003001",
+          "index": 0,
+          "label": "grip",
+          "visible": true,
+          "occupied_material_uuid": null,
+          "pose": {
+            "position": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 0.0
+            }
+          },
+          "allowed_resource_categories": [],
+          "parent_link": "",
+          "description": "两步搬运时夹着样品的夹爪库位",
+          "meta_data": {
+            "role": "gripper"
+          },
+          "extra": {}
+        }
+      ],
       "pose": {
         "position": {
           "x": 0,
@@ -50,45 +75,6 @@
           "depth": 10
         }
       }
-    },
-    {
-      "id": "gripper",
-      "uuid": "5c2e7d90-4b1f-4a83-9e6a-000000003003",
-      "name": "演示夹爪",
-      "type": "resource",
-      "class": "Resource",
-      "template_name": "custody_demo_sample",
-      "parent": "reactor",
-      "children": [],
-      "sites_initialized": true,
-      "sites": [
-        {
-          "uuid": "5c2e7d90-4b1f-4a83-9e6a-000000003004",
-          "template_name": "custody_demo_sample",
-          "label": "grip",
-          "meta_data": {
-            "role": "gripper"
-          },
-          "index": 0
-        }
-      ],
-      "config": {
-        "type": "Resource"
-      },
-      "data": {},
-      "pose": {
-        "position": {
-          "x": 0,
-          "y": 0,
-          "z": 0
-        },
-        "size": {
-          "width": 10,
-          "height": 10,
-          "depth": 10
-        }
-      },
-      "parent_uuid": "5c2e7d90-4b1f-4a83-9e6a-000000003001"
     }
   ],
   "links": []

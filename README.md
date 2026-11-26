@@ -222,25 +222,33 @@ def load_sample(self, sample: ResourceSlot, vessel: DeviceSlot) -> CustodyResult
 @action(display_name="原位处理", material=Material.in_place("sample"))
 @action(display_name="卸载样品", material=Material.unload("sample", device="vessel"))
 
-@action(display_name="抓取到夹爪", material=Material.pick("sample", owner="owner", site="site", carriers=["carrier"]))
-def pick(self, sample: ResourceSlot, owner: ResourceSlot, site: SiteSlot,
-         carrier: ResourceSlot, gripper_site: SiteSlot) -> TransferResult: ...
+@action(display_name="抓取到夹爪", material=Material.pick("sample", from_site="from_site"))
+def pick(self, sample: ResourceSlot, from_site: SiteSlot) -> TransferResult: ...
 
-@action(display_name="放回目标库位", material=Material.place("sample", owner="owner", site="site", carriers=["carrier"]))
-def place(self, sample: ResourceSlot, owner: ResourceSlot, site: SiteSlot, carrier: ResourceSlot) -> TransferResult: ...
+@action(display_name="放回目标库位", material=Material.place("sample", to_site="to_site"))
+def place(self, sample: ResourceSlot, to_site: SiteSlot) -> TransferResult: ...
 
-@action(display_name="按实测量分装", material=Material.aliquot(source="source", targets=["target"]))
+@action(display_name="按实测量分装", material=Material.dispense(from_material="source", to_materials=["target"]))
 ```
 
 The strings are parameter names, checked against the signature at registration. Parameters
 and return values are validated against the signature and the return annotation (one standard
 for every action; core doc `docs/developer_guide/action_standard.md`).
 
-The parameter type picks the editor's selector: `ResourceSlot` gives a material picker and a
-material lock, `SiteSlot` a Site picker (the value is a site UUID) and `DeviceSlot` a device
-picker (the value is a device ID). Site and device parameters take no lock. Workflow inputs
+`pick` / `place` / `dispense` declare real material actions: the core settles the sample's
+location from the transfer receipt and the contents from the aliquot receipt, so the driver
+never writes the location itself. The owner of `from_site` / `to_site` is derived from the
+site, and the carrier is the executing device (`carrier_device=` omitted): the reactor has one
+`meta_data.role == "gripper"` site (`available_sites` on `@device`, `grip` in the graph), and the
+sample sits on it between `pick` and `place` while the task holds the reactor. `load` /
+`unload` / `in_place` are experimental and warn once at registration; `device=` is a
+`DeviceSlot` parameter and may be omitted to mean the executing device.
+
+The parameter type picks the editor's selector and the lock: `ResourceSlot` gives a material
+picker and a material lock, `SiteSlot` a Site picker (the value is a site UUID) and a site lock,
+`DeviceSlot` a device picker (the value is a device ID) and a device lock. Workflow inputs
 accept only basic types and `ResourceSlot`, so the template inputs `vessel` and
-`origin_site` / `target_site` / `gripper_site` stay `str` and are passed on to those parameters.
+`origin_site` / `target_site` stay `str` and are passed on to those parameters.
 
 
 ## Joint demo: conditional inventory, custody and actual settlement
@@ -254,8 +262,8 @@ not replace a fresh install or ROS 2 verification.
 `联合演示：托管分装与补料` is a `@workflow` template. It uses the device ID `reactor` as its
 default role and, inside an explicit resource scope, picks the sample, selects an inventory
 source and aliquots in two rounds, then places the sample on the target site. The frontend
-handles role rebinding and the entry resource parameters. `pick.site`, `pick.gripper_site`
-and `place.site` are bound to the workflow inputs, and the real site UUIDs arrive with the
+handles role rebinding and the entry resource parameters. `pick.from_site` and
+`place.to_site` are bound to the workflow inputs, and the real site UUIDs arrive with the
 task `input`. A script therefore imports the template with
 `"site_binding_mode": "preserve"`, as the browser does; with the default `resolve` the import
 treats the input references as Site labels and fails.

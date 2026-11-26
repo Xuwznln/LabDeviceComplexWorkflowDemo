@@ -188,29 +188,33 @@ def load_sample(self, sample: ResourceSlot, vessel: DeviceSlot) -> CustodyResult
 @action(display_name="原位处理", material=Material.in_place("sample"))
 @action(display_name="卸载样品", material=Material.unload("sample", device="vessel"))
 
-@action(display_name="抓取到夹爪", material=Material.pick("sample", owner="owner", site="site", carriers=["carrier"]))
-def pick(self, sample: ResourceSlot, owner: ResourceSlot, site: SiteSlot,
-         carrier: ResourceSlot, gripper_site: SiteSlot) -> TransferResult: ...
+@action(display_name="抓取到夹爪", material=Material.pick("sample", from_site="from_site"))
+def pick(self, sample: ResourceSlot, from_site: SiteSlot) -> TransferResult: ...
 
-@action(display_name="放回目标库位", material=Material.place("sample", owner="owner", site="site", carriers=["carrier"]))
-def place(self, sample: ResourceSlot, owner: ResourceSlot, site: SiteSlot, carrier: ResourceSlot) -> TransferResult: ...
+@action(display_name="放回目标库位", material=Material.place("sample", to_site="to_site"))
+def place(self, sample: ResourceSlot, to_site: SiteSlot) -> TransferResult: ...
 
-@action(display_name="按实测量分装", material=Material.aliquot(source="source", targets=["target"]))
+@action(display_name="按实测量分装", material=Material.dispense(from_material="source", to_materials=["target"]))
 ```
 
 字符串都是参数名，注册时对照签名检查。参数与返回值按签名和返回注解校验（所有动作同一标准，核心文档
 `docs/developer_guide/action_standard.md`）。
 
-参数类型决定编辑器里的选择器：`ResourceSlot` 是物料选择器并加物料锁，`SiteSlot` 是库位选择器（值为 site uuid），
-`DeviceSlot` 是设备选择器（值为设备 ID）；库位与设备参数不加锁。工作流输入只支持基础类型与 `ResourceSlot`，
-所以模板输入 `vessel` 和 `origin_site` / `target_site` / `gripper_site` 仍是 `str`，再传给上述参数。
+`pick` / `place` / `dispense` 声明的是真实的物料动作：样品位置由核心按搬运回执结算、内容物按分装回执结算，驱动不自己写位置。
+`from_site` / `to_site` 的所属物料由库位决定；搬运设备省略（不写 `carrier_device=`）即执行设备：reactor 有唯一一个
+`meta_data.role == "gripper"` 的库位（`@device` 的 `available_sites`，图里的 `grip`），`pick` 到 `place` 之间样品在这个库位上、
+任务托管 reactor。`load` / `unload` / `in_place` 是实验性功能，注册时告警一次；`device=` 是 `DeviceSlot` 参数，省略即执行设备。
+
+参数类型决定编辑器里的选择器和锁：`ResourceSlot` 是物料选择器并加物料锁，`SiteSlot` 是库位选择器（值为 site uuid）并加库位锁，
+`DeviceSlot` 是设备选择器（值为设备 ID）并加设备锁。工作流输入只支持基础类型与 `ResourceSlot`，
+所以模板输入 `vessel` 和 `origin_site` / `target_site` 仍是 `str`，再传给上述参数。
 
 ## 条件库存、托管与实际结算联合演示
 
 配套后端为统一版 Uni-Lab-OS 核心（合并了 [#360](https://github.com/deepmodeling/Uni-Lab-OS/pull/360) 的循环作用域、借还 / 托管、条件库存与物理回执结算，仅支持 CPython 3.14），CI 固定的核心提交见 `.github/workflows/check_registry.yml` 的 `STABLE_CORE_REF`。本地 HostLink 联调结果不替代全新环境安装或 ROS 2 验证。
 
-`联合演示：托管分装与补料` 使用 `@workflow` 模板和 `reactor` 设备 ID 默认角色。显式作用域覆盖抓取、两轮动态来源与条件分装，以及放回目标库位；设备换绑和入口资源选择由前端负责。`pick.site`、`pick.gripper_site` 与 `place.site` 绑定到工作流输入，真实 site uuid 随任务 `input` 提交，所以脚本导入该模板时传 `"site_binding_mode": "preserve"`（与浏览器相同）；默认的 `resolve` 会把输入引用当作库位标签去解析而失败。
+`联合演示：托管分装与补料` 使用 `@workflow` 模板和 `reactor` 设备 ID 默认角色。显式作用域覆盖抓取、两轮动态来源与条件分装，以及放回目标库位；设备换绑和入口资源选择由前端负责。`pick.from_site` 与 `place.to_site` 绑定到工作流输入，真实 site uuid 随任务 `input` 提交，所以脚本导入该模板时传 `"site_binding_mode": "preserve"`（与浏览器相同）；默认的 `resolve` 会把输入引用当作库位标签去解析而失败。
 
 运行上面的 smoke 命令会先入库 7 ul，分装动作执行前预检报缺料（待决策清单出现 `preflight` 决策：重试、跳过、人工替换为成功或放弃），补入 20 ul 后重试；每轮计划 10 ul、虚拟实测 8 ul。最终来源剩余 84 ul、目标收到 16 ul、库存剩余 11 ul；未选分支不预留，夹爪、托管和物理占用全部释放。
 
-pick/place/aliquot 返回虚拟实测回执。真实驱动必须报告实际完成量与实际到达的目标库位，不能用计划参数替代实测。
+pick/place/aliquot（`Material.pick` / `place` / `dispense`）返回虚拟实测回执。真实驱动必须报告实际完成量与实际到达的目标库位，不能用计划参数替代实测。

@@ -101,7 +101,7 @@ class VirtualReactorDemo:
         always_free=False,
         display_name="装载样品",
         description="把样品装进设备；任务托管该设备直到「卸载样品」，期间其他任务不能使用它",
-        materials=Material.load("sample", device="vessel"),
+        material_contract=Material.load("sample", device="vessel"),
     )
     def load_sample(self, sample: ResourceSlot, vessel: DeviceSlot) -> CustodyResult:
         """装载样品并开始设备托管。
@@ -119,7 +119,7 @@ class VirtualReactorDemo:
         always_free=False,
         display_name="原位处理",
         description="处理仍在设备内的样品；设备里没有样品则报错",
-        materials=Material.in_place("sample"),
+        material_contract=Material.in_place("sample"),
     )
     def process_sample(self, sample: ResourceSlot) -> CustodyResult:
         """原位处理已装载的样品。
@@ -135,7 +135,7 @@ class VirtualReactorDemo:
         always_free=False,
         display_name="卸载样品",
         description="把样品从设备取出，结束任务对该设备的托管",
-        materials=Material.unload("sample", device="vessel"),
+        material_contract=Material.unload("sample", device="vessel"),
     )
     def unload_sample(self, sample: ResourceSlot, vessel: DeviceSlot) -> CustodyResult:
         """卸载样品并结束设备托管。
@@ -165,7 +165,7 @@ class VirtualReactorDemo:
         always_free=False,
         display_name="抓取到夹爪",
         description="两步搬运第一步：把样品从来源库位抓到本设备的夹爪库位；位置由核心按声明结算，驱动不交搬运回执",
-        materials=Material.pick("sample", from_site="from_site"),
+        material_contract=Material.pick("sample", from_site="from_site"),
     )
     def pick(self, sample: ResourceSlot, from_site: SiteSlot) -> None:
         """抓取样品。
@@ -182,7 +182,7 @@ class VirtualReactorDemo:
         always_free=False,
         display_name="放回目标库位",
         description="两步搬运第二步：把样品从本设备的夹爪库位放到目标库位；位置由核心按声明结算，驱动不交搬运回执",
-        materials=Material.place("sample", to_site="to_site"),
+        material_contract=Material.place("sample", to_site="to_site"),
     )
     def place(self, sample: ResourceSlot, to_site: SiteSlot) -> None:
         """放回样品。
@@ -196,7 +196,7 @@ class VirtualReactorDemo:
         always_free=False,
         display_name="按实测量分装",
         description="从来源物料分装到目标物料：计划 10 ul、虚拟实测 8 ul，只回报实测回执，由权威结算",
-        materials=Material.dispense(from_material="source", to_materials=["target"]),
+        material_contract=Material.dispense(from_material="source", to_materials=["target"]),
     )
     def aliquot(self, source: ResourceSlot, target: ResourceSlot, solvent: dict[str, JSONValue]) -> AliquotResult:
         """按实测量分装。

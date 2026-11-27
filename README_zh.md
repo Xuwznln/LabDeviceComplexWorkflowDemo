@@ -179,22 +179,22 @@ HostLink smoke 同时核对默认输入、条件 attempt 历史和最终输出 `
 会运行原有五条流程、四次资源场景任务及下述联合结算流程，共十个任务，并对照独立 authority / Host 数据库，
 验证开始许可、资源使用、借还及托管最终状态。该演示使用虚拟设备，不代表真实硬件或多 slave 验收。
 
-这些动作的资源语义写在 `@action` 的一个字段 `materials=` 里（`reactor.py`，实验性功能）：
+这些动作的资源语义写在 `@action` 的一个字段 `material_contract=` 里（`reactor.py`，实验性功能）：
 
 ```python
-@action(display_name="装载样品", materials=Material.load("sample", device="vessel"))
+@action(display_name="装载样品", material_contract=Material.load("sample", device="vessel"))
 def load_sample(self, sample: ResourceSlot, vessel: DeviceSlot) -> CustodyResult: ...
 
-@action(display_name="原位处理", materials=Material.in_place("sample"))
-@action(display_name="卸载样品", materials=Material.unload("sample", device="vessel"))
+@action(display_name="原位处理", material_contract=Material.in_place("sample"))
+@action(display_name="卸载样品", material_contract=Material.unload("sample", device="vessel"))
 
-@action(display_name="抓取到夹爪", materials=Material.pick("sample", from_site="from_site"))
+@action(display_name="抓取到夹爪", material_contract=Material.pick("sample", from_site="from_site"))
 def pick(self, sample: ResourceSlot, from_site: SiteSlot) -> None: ...
 
-@action(display_name="放回目标库位", materials=Material.place("sample", to_site="to_site"))
+@action(display_name="放回目标库位", material_contract=Material.place("sample", to_site="to_site"))
 def place(self, sample: ResourceSlot, to_site: SiteSlot) -> None: ...
 
-@action(display_name="按实测量分装", materials=Material.dispense(from_material="source", to_materials=["target"]))
+@action(display_name="按实测量分装", material_contract=Material.dispense(from_material="source", to_materials=["target"]))
 ```
 
 字符串都是参数名，注册时对照签名检查。参数与返回值按签名和返回注解校验（所有动作同一标准，核心文档
@@ -203,7 +203,7 @@ def place(self, sample: ResourceSlot, to_site: SiteSlot) -> None: ...
 `pick` / `place` / `dispense` 声明的是真实的物料动作：样品位置由核心按派发前冻结的声明结算（驱动不交搬运回执），内容物按分装回执结算，驱动不自己写位置。
 `from_site` / `to_site` 的所属物料由库位决定；搬运设备省略（不写 `carrier_device=`）即执行设备：reactor 有唯一一个
 `meta_data.role == "gripper"` 的库位（`@device` 的 `available_sites`，图里的 `grip`），`pick` 到 `place` 之间样品在这个库位上、
-任务托管 reactor。整个 `materials=` 字段是实验性功能，用到它的动作注册时各告警一次；`device=` 是 `DeviceSlot` 参数，省略即执行设备。
+任务托管 reactor。整个 `material_contract=` 字段是实验性功能，用到它的动作注册时各告警一次；`device=` 是 `DeviceSlot` 参数，省略即执行设备。
 
 参数类型决定编辑器里的选择器和锁：`ResourceSlot` 是物料选择器并加物料锁，`SiteSlot` 是库位选择器（值为 site uuid）并加库位锁，
 `DeviceSlot` 是设备选择器（值为设备 ID）并加设备锁。工作流输入只支持基础类型与 `ResourceSlot`，

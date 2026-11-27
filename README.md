@@ -213,22 +213,22 @@ all, and checks start permits, resource use, loans and the final custody state a
 separate authority / Host databases. The demo uses virtual devices; it is not a real-hardware
 or multi-slave acceptance.
 
-The resource semantics of these actions are one experimental `@action` field, `materials=` (`reactor.py`):
+The resource semantics of these actions are one experimental `@action` field, `material_contract=` (`reactor.py`):
 
 ```python
-@action(display_name="装载样品", materials=Material.load("sample", device="vessel"))
+@action(display_name="装载样品", material_contract=Material.load("sample", device="vessel"))
 def load_sample(self, sample: ResourceSlot, vessel: DeviceSlot) -> CustodyResult: ...
 
-@action(display_name="原位处理", materials=Material.in_place("sample"))
-@action(display_name="卸载样品", materials=Material.unload("sample", device="vessel"))
+@action(display_name="原位处理", material_contract=Material.in_place("sample"))
+@action(display_name="卸载样品", material_contract=Material.unload("sample", device="vessel"))
 
-@action(display_name="抓取到夹爪", materials=Material.pick("sample", from_site="from_site"))
+@action(display_name="抓取到夹爪", material_contract=Material.pick("sample", from_site="from_site"))
 def pick(self, sample: ResourceSlot, from_site: SiteSlot) -> None: ...
 
-@action(display_name="放回目标库位", materials=Material.place("sample", to_site="to_site"))
+@action(display_name="放回目标库位", material_contract=Material.place("sample", to_site="to_site"))
 def place(self, sample: ResourceSlot, to_site: SiteSlot) -> None: ...
 
-@action(display_name="按实测量分装", materials=Material.dispense(from_material="source", to_materials=["target"]))
+@action(display_name="按实测量分装", material_contract=Material.dispense(from_material="source", to_materials=["target"]))
 ```
 
 The strings are parameter names, checked against the signature at registration. Parameters
@@ -241,7 +241,7 @@ contents from the aliquot receipt, so the driver never writes the location itsel
 site, and the carrier is the executing device (`carrier_device=` omitted): the reactor has one
 `meta_data.role == "gripper"` site (`available_sites` on `@device`, `grip` in the graph), and the
 sample sits on it between `pick` and `place` while the task holds the reactor. The whole
-`materials=` field is experimental: each action that uses it warns once at registration; `device=` is a
+`material_contract=` field is experimental: each action that uses it warns once at registration; `device=` is a
 `DeviceSlot` parameter and may be omitted to mean the executing device.
 
 The parameter type picks the editor's selector and the lock: `ResourceSlot` gives a material

@@ -216,19 +216,19 @@ or multi-slave acceptance.
 The resource semantics of these actions are one experimental `@action` field, `material_contract=` (`reactor.py`):
 
 ```python
-@action(display_name="装载样品", material_contract=Material.load("sample", device="vessel"))
+@action(display_name="装载样品", material_contract=MaterialRole.load("sample", device="vessel"))
 def load_sample(self, sample: ResourceSlot, vessel: DeviceSlot) -> CustodyResult: ...
 
-@action(display_name="原位处理", material_contract=Material.in_place("sample"))
-@action(display_name="卸载样品", material_contract=Material.unload("sample", device="vessel"))
+@action(display_name="原位处理", material_contract=MaterialRole.in_place("sample"))
+@action(display_name="卸载样品", material_contract=MaterialRole.unload("sample", device="vessel"))
 
-@action(display_name="抓取到夹爪", material_contract=Material.pick("sample", from_site="from_site"))
+@action(display_name="抓取到夹爪", material_contract=MaterialRole.pick("sample", from_site="from_site"))
 def pick(self, sample: ResourceSlot, from_site: SiteSlot) -> None: ...
 
-@action(display_name="放回目标库位", material_contract=Material.place("sample", to_site="to_site"))
+@action(display_name="放回目标库位", material_contract=MaterialRole.place("sample", to_site="to_site"))
 def place(self, sample: ResourceSlot, to_site: SiteSlot) -> None: ...
 
-@action(display_name="按实测量分装", material_contract=Material.dispense(from_material="source", to_materials=["target"]))
+@action(display_name="按实测量分装", material_contract=MaterialRole.dispense(from_material="source", to_materials=["target"]))
 ```
 
 The strings are parameter names, checked against the signature at registration. Parameters

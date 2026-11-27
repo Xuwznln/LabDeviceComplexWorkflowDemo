@@ -182,19 +182,19 @@ HostLink smoke 同时核对默认输入、条件 attempt 历史和最终输出 `
 这些动作的资源语义写在 `@action` 的一个字段 `material_contract=` 里（`reactor.py`，实验性功能）：
 
 ```python
-@action(display_name="装载样品", material_contract=Material.load("sample", device="vessel"))
+@action(display_name="装载样品", material_contract=MaterialRole.load("sample", device="vessel"))
 def load_sample(self, sample: ResourceSlot, vessel: DeviceSlot) -> CustodyResult: ...
 
-@action(display_name="原位处理", material_contract=Material.in_place("sample"))
-@action(display_name="卸载样品", material_contract=Material.unload("sample", device="vessel"))
+@action(display_name="原位处理", material_contract=MaterialRole.in_place("sample"))
+@action(display_name="卸载样品", material_contract=MaterialRole.unload("sample", device="vessel"))
 
-@action(display_name="抓取到夹爪", material_contract=Material.pick("sample", from_site="from_site"))
+@action(display_name="抓取到夹爪", material_contract=MaterialRole.pick("sample", from_site="from_site"))
 def pick(self, sample: ResourceSlot, from_site: SiteSlot) -> None: ...
 
-@action(display_name="放回目标库位", material_contract=Material.place("sample", to_site="to_site"))
+@action(display_name="放回目标库位", material_contract=MaterialRole.place("sample", to_site="to_site"))
 def place(self, sample: ResourceSlot, to_site: SiteSlot) -> None: ...
 
-@action(display_name="按实测量分装", material_contract=Material.dispense(from_material="source", to_materials=["target"]))
+@action(display_name="按实测量分装", material_contract=MaterialRole.dispense(from_material="source", to_materials=["target"]))
 ```
 
 字符串都是参数名，注册时对照签名检查。参数与返回值按签名和返回注解校验（所有动作同一标准，核心文档
@@ -217,4 +217,4 @@ def place(self, sample: ResourceSlot, to_site: SiteSlot) -> None: ...
 
 运行上面的 smoke 命令会先入库 7 ul，分装动作执行前预检报缺料（待决策清单出现 `preflight` 决策：重试、跳过、人工替换为成功或放弃），补入 20 ul 后重试；每轮计划 10 ul、虚拟实测 8 ul。最终来源剩余 84 ul、目标收到 16 ul、库存剩余 11 ul；未选分支不预留，夹爪、托管和物理占用全部释放。
 
-aliquot（`Material.dispense`）返回虚拟实测回执；pick/place（`Material.pick` / `place`）不返回内容，动作成功后由核心按声明结算位置。真实驱动必须报告实际完成量，不能用计划参数替代实测。
+aliquot（`MaterialRole.dispense`）返回虚拟实测回执；pick/place（`MaterialRole.pick` / `place`）不返回内容，动作成功后由核心按声明结算位置。真实驱动必须报告实际完成量，不能用计划参数替代实测。
